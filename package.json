@@ -1,5 +1,9 @@
 {
-  "name": "@dsh-external/dsh-deep-research",
+  "name": "dsh-deep-research",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/cireric/dsh-deep-research.git"
+  },
   "description": "Deep Research orchestrator for DeepSeek Harness (v2): Claude engineering skeleton x dsh mechanism design - adaptive cybernetics/information-theory deep_research tool on the official workflow engine, reusing built-in web_search/web_fetch, with background jobs, enforced verifier, and artifact persistence.",
   "version": "2.0.0",
   "private": true,
