@@ -14,7 +14,7 @@
  *   ctx.workflowEngine.start({ script, meta, args, parent, signal, subagentProvider?, maxTotalAgents? })
  *   ctx.jobs.start({ kind:'deep-research', label, owner, run: () => JobHooks })
  *
- * @module @dsh-external/dsh-deep-research
+ * @module dsh-deep-research (github.com/cireric/dsh-deep-research)
  */
 
 import { defineTool } from '@deepseek-ai/dsh-tools'
@@ -24,6 +24,7 @@ import { RESEARCH_SCRIPT } from './script.ts'
 import { persistArtifacts, pruneRuns, resolveWorkspaceDir } from './artifacts.ts'
 import type { ScriptResultShape, VerificationStatus } from './artifacts.ts'
 import { startBackgroundRun } from './background.ts'
+import { parseQuestionList } from './questions.ts'
 
 // v2 后台模式需要 JobKindMap 声明合并：jobId 前缀即 kind 名 → `deep-research-N`。
 declare module '@deepseek-ai/dsh-jobs' {
@@ -71,7 +72,7 @@ export interface Config {
   /** 产物根目录（默认 `<session-cwd>/.research`）。 */
   workspaceDir?: string
   backgroundMode?: 'background' | 'foreground'
-  /** 保留最近 N 个 run 目录。 */
+  /** 保留最近 N 个 run 目录（≥1；不提供则用默认值 20）。 */
   keepRuns?: number
   /** 预留开关：raw 抓取片段落盘增强（v2.0 未启用，见 spec 开放项② / ADR-0002 D7）。 */
   rawNotes?: boolean
@@ -125,18 +126,9 @@ function resolveConfig(config: Config): ResolvedConfig {
     searchBudget: positiveInt(config.searchBudget, 'searchBudget') ?? DEFAULTS.searchBudget,
     verifierMaxRounds: nonNegativeInt(config.verifierMaxRounds, 'verifierMaxRounds') ?? DEFAULTS.verifierMaxRounds,
     maxItemsPerCall: positiveInt(config.maxItemsPerCall, 'maxItemsPerCall') ?? DEFAULTS.maxItemsPerCall,
-    keepRuns: nonNegativeInt(config.keepRuns, 'keepRuns') ?? DEFAULTS.keepRuns,
+    keepRuns: positiveInt(config.keepRuns, 'keepRuns') ?? DEFAULTS.keepRuns,
     backgroundMode: config.backgroundMode ?? DEFAULTS.backgroundMode,
   }
-}
-
-function parseQuestionList(raw: string | undefined): Array<{ question: string }> {
-  if (typeof raw !== 'string') return []
-  return raw
-    .split('\n')
-    .map((line) => line.replace(/^\s*(?:\d+[.、)])?\s*/, '').trim())
-    .filter((line) => line.length > 0)
-    .map((question) => ({ question }))
 }
 
 /** verification.status 的封闭词表（评审 F3：白名单之外才归 'unknown'）。 */
@@ -167,7 +159,7 @@ function shapeScriptResult(value: unknown): ScriptResultShape {
     subquestions: num(r.subquestions),
     completed: num(r.completed),
     failed: num(r.failed),
-    plan: r.plan,
+    plan: r.plan ?? null,
     items: Array.isArray(r.items) ? (r.items as ScriptResultShape['items']) : [],
     dropped_by_cap: Array.isArray(r.dropped_by_cap)
       ? (r.dropped_by_cap as ScriptResultShape['dropped_by_cap'])
@@ -287,7 +279,9 @@ export function apply(ctx: Context, config: Config = {}) {
         const cfg = resolved
 
         // ---------- 参数校验（T2 契约保持不变） ----------
-        const topic = String(args.topic).trim()
+        // 平台已按 required:true 在 execute 前拦截缺失 topic；此处仍做运行时形状防御，
+        // 且不用 String(args.topic)——它会把 undefined 折叠成字符串 "undefined" 骗过空串检查。
+        const topic = typeof args.topic === 'string' ? args.topic.trim() : ''
         if (topic.length === 0) throw new Error('deep_research: topic must not be empty')
         const purpose = typeof args.purpose === 'string' && args.purpose.trim().length > 0 ? args.purpose.trim() : undefined
         const depth = args.depth === undefined ? 2 : positiveInt(args.depth, 'depth') ?? 2
@@ -415,7 +409,8 @@ export function apply(ctx: Context, config: Config = {}) {
           artifactsDir = paths.dir
           await pruneRuns(workspaceDir, sessionId, cfg.keepRuns)
         } catch {
-          // 落盘失败：交付证据仍在工具返回的紧凑负载中，产物缺失如实反映为无指针。
+          // 落盘失败是有意静默：前台没有进度缓冲可写，注入 logger 会扩大服务接缝依赖。
+          // 唯一信号即负载缺指针；交付证据仍在紧凑负载中，不受影响。
         }
 
         return {

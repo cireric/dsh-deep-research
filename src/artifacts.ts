@@ -7,8 +7,9 @@
  *   evidence_state.md / verification.json / review.md
  * 工具返回紧凑负载只携带 reportPath/artifactsDir 指针，全量正文不进工具返回值。
  *
- * per-session 子目录防多会话目录串扰（审核 C5）；keepRuns 保留最近 N 个 run（默认 20），
- * 超出按目录 mtime 从旧到新惰性清理。落盘失败不炸工具——降级为负载中的 warning 字段。
+ * per-session 子目录防多会话目录串扰（审核 C5）；keepRuns 保留最近 N 个 run（≥1，默认 20），
+ * 超出按目录 mtime 从旧到新惰性清理。落盘失败不炸工具——降级形态由调用方决定：
+ * 前台路径有意静默为无指针负载（见 index.ts execute 收尾注释），后台路径把告警压入任务进度缓冲。
  */
 import { mkdir, readdir, rm, stat, writeFile } from 'node:fs/promises'
 import * as path from 'node:path'
@@ -64,7 +65,10 @@ export interface ArtifactPaths {
 }
 
 function sanitizeSegment(raw: string): string {
-  return raw.replace(/[^A-Za-z0-9._-]/g, '_').slice(0, 120) || 'unnamed'
+  const cleaned = raw.replace(/[^A-Za-z0-9._-]/g, '_').slice(0, 120)
+  // 全点段（'.' / '..'）各自字符都合法、组合却是相对路径操作符——字符白名单拦不住段级语义，
+  // 必须显式归占位符，否则 path.join 会越出 workspace 根目录。
+  return cleaned.length > 0 && !/^\.+$/.test(cleaned) ? cleaned : 'unnamed'
 }
 
 /** 解析 workspaceDir：显式配置优先，否则取父会话 cwd 下的 `.research`。 */
@@ -87,7 +91,7 @@ export async function persistArtifacts(
   const roundsDir = path.join(dir, 'rounds')
   await mkdir(roundsDir, { recursive: true })
 
-  await writeFile(path.join(dir, 'plan.json'), JSON.stringify(result.plan, null, 2), 'utf8')
+  await writeFile(path.join(dir, 'plan.json'), JSON.stringify(result.plan ?? null, null, 2), 'utf8')
 
   // rounds/<round>-<n>.json — 按 round 分组、组内 1-based 序号
   const byRound = new Map<number, EvidenceItem[]>()

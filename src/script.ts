@@ -5,7 +5,7 @@
  *   agent(prompt, opts?) / parallel(thunks) / pipeline(items, ...stages) / phase(title) / log(msg) / args
  * 无 fs、无网络、无 Node API；agent() 选项仅 label/phase/schema/provider/model。
  *
- * 落实规格条目（spec/deep-research-hybrid.md）：
+ * 落实规格条目（docs/spec/dsh-deep-research.md）：
  *   - 流水线状态机：规划 → 研究(自适应闭环) → 综合 → 验证+修复环 → 可选审查（A3 单一时序）；
  *   - R3 切片：每轮子问题按 min(maxParallel, maxItemsPerCall) 切片，逐切片 parallel()（防 ITEM_CAP 致命失败）；
  *   - R4 分支：synthesize=false 时跳过综合，改为对中间证据轻量验证、不产 report；
@@ -19,7 +19,7 @@
  * 一律使用单引号 + 字符串拼接。返回值必须为纯 JSON（引擎 RESULT_UNSERIALIZABLE 兜底）。
  */
 export const RESEARCH_SCRIPT = String.raw`
-const topic = typeof args.topic === 'string' ? args.topic : String(args.topic)
+const topic = typeof args.topic === 'string' ? args.topic : '' // 宿主已校验非空；兜底为空串而非 "undefined"
 const purpose = typeof args.purpose === 'string' ? args.purpose : ''
 const language = typeof args.language === 'string' && args.language.length > 0 ? args.language : 'zh'
 const depth = typeof args.depth === 'number' && args.depth >= 1 ? Math.floor(args.depth) : 2

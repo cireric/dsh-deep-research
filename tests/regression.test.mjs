@@ -16,6 +16,8 @@
  *   ⑥ compact payload shape + verification.status vocabulary (+ pure-JSON round-trip)
  * Plus new-seam assertions: jobs bridge lifecycle (kind/killed-mapping/cancel/readOutput),
  * JobKindMap declaration merging, and artifact persistence/pruning.
+ * Review-fix batch: question-list numbering disambiguation, absent-plan degradation,
+ * dot-segment traversal hardening.
  *
  * Run: node --test tests/
  */
@@ -634,4 +636,76 @@ test('artifacts: full layout per run; review.md conditional; keepRuns pruning; w
       },
     }
   }
+})
+
+// ---------------------------------------------------------------- T4 hardening regressions
+
+/** Minimal valid ScriptResultShape for persistence-focused hardening tests. */
+function makeShaped(overrides = {}) {
+  return {
+    report: '# 报告',
+    report_note: '',
+    review: '',
+    rounds: 1,
+    subquestions: 1,
+    completed: 1,
+    failed: 0,
+    plan: { scope: 's', dimensions: [], questions: [], coverage_gaps: [] },
+    items: [],
+    dropped_by_cap: [],
+    blindspots: [],
+    evidence_state: '',
+    verification: {
+      status: 'passed',
+      claims: { verified: 0, unverified: 0, refuted: 0 },
+      issues: [],
+      uncovered_dimensions: [],
+      overconfident: [],
+      revision_rounds: 0,
+    },
+    ...overrides,
+  }
+}
+
+test('hardening: an absent plan degrades to null instead of killing all persistence', async () => {
+  const { persistArtifacts } = await importSrc('artifacts.ts')
+  const base = await mkdtemp(path.join(tmpdir(), 'dsh-deep-research-test-'))
+  try {
+    const paths = await persistArtifacts(base, 'sess-hard', 'run-plan-null', makeShaped({ plan: undefined }))
+    assert.ok(existsSync(path.join(paths.dir, 'report.md')), 'report.md still persisted')
+    assert.equal(await readFile(path.join(paths.dir, 'plan.json'), 'utf8'), 'null', 'plan.json written as JSON null')
+  } finally {
+    await rm(base, { recursive: true, force: true })
+  }
+})
+
+test('hardening: dot-only session/run segments cannot traverse out of the workspace root', async () => {
+  const { persistArtifacts } = await importSrc('artifacts.ts')
+  const base = await mkdtemp(path.join(tmpdir(), 'dsh-deep-research-test-'))
+  try {
+    const paths = await persistArtifacts(base, '..', '...', makeShaped())
+    assert.equal(paths.dir, path.join(base, 'unnamed', 'unnamed'), "dot-only segments collapse to a placeholder")
+    assert.ok(existsSync(path.join(paths.dir, 'report.md')))
+  } finally {
+    await rm(base, { recursive: true, force: true })
+  }
+})
+
+// ---------------------------------------------------------------- T2 question-list parsing
+
+test('question list parsing: numbering stripped only when unambiguous (review fix)', async () => {
+  const { parseQuestionList } = await importSrc('questions.ts')
+  // 无歧义编号（点号+空白 / 顿号 / 右括号）→ 剥离
+  assert.deepEqual(
+    parseQuestionList('1. 甲\n2、乙\n3) 丙'),
+    [{ question: '甲' }, { question: '乙' }, { question: '丙' }],
+  )
+  // 以数字开头的内容本身不得误伤（旧实现把 "3.14 是什么" 错剥成 "14 是什么"）
+  assert.deepEqual(parseQuestionList('3.14 是什么'), [{ question: '3.14 是什么' }])
+  assert.deepEqual(parseQuestionList('2.0版本发布了哪些变化？'), [{ question: '2.0版本发布了哪些变化？' }])
+  // 紧凑点号写法（编号后无空格）：宁可少剥不可错剥
+  assert.deepEqual(parseQuestionList('1.甲'), [{ question: '1.甲' }])
+  // 空行/纯空白行丢弃；非字符串入参返回空数组
+  assert.deepEqual(parseQuestionList('\n  \n甲\n'), [{ question: '甲' }])
+  assert.deepEqual(parseQuestionList(undefined), [])
 })
