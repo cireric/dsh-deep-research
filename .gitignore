@@ -1,0 +1,8 @@
+# build output
+lib/
+
+# local dependency links (junctions into ../deepseek-harness)
+node_modules/
+
+# tsbuildinfo
+*.tsbuildinfo
