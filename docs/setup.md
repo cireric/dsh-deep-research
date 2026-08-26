@@ -12,9 +12,9 @@
 三种来源任选其一（`dsh plugin` 是 profile 内 pnpm 的薄封装，安装后自动依据 package.json 的 `dsh.bundle.patch` 声明把本包挂入 profile bundles 层；完整说明见 README「安装」）：
 
 ```bash
-dsh plugin --profile web add dsh-deep-research-hybrid                   # 方式一：npm registry（本包发布后）
-dsh plugin --profile web add github:<owner>/dsh-deep-research-hybrid    # 方式二：GitHub（pnpm ≥10 需按提示放行 prepare 构建）
-dsh plugin --profile web add link:/abs/path/to/dsh-deep-research-hybrid # 方式三：本地（先在本包 npm run build 出 lib/）
+dsh plugin --profile web add dsh-deep-research                # 方式一：npm registry（本包发布后）
+dsh plugin --profile web add github:cireric/dsh-deep-research # 方式二：GitHub（pnpm ≥10 需按提示放行 prepare 构建）
+dsh plugin --profile web add link:/abs/path/to/dsh-deep-research # 方式三：本地（先在本包 npm run build 出 lib/）
 ```
 
 等价于手动向 profile 插入如下行：
@@ -22,12 +22,12 @@ dsh plugin --profile web add link:/abs/path/to/dsh-deep-research-hybrid # 方式
 ```yaml
 - insert:
     - id: dsh-deep-research
-      name: '@dsh-external/dsh-deep-research'
+      name: 'dsh-deep-research'
 ```
 
 peer 依赖需在加载方可解析：`cordis`、`@deepseek-ai/dsh-tools`、`@deepseek-ai/dsh-workflow`、`@deepseek-ai/dsh-jobs`、`@deepseek-ai/dsh-agent`。在本仓库外安装时由宿主 node_modules/workspace 链接提供；仓库内开发见 §4。
 
-卸载与更新：`dsh plugin --profile web remove|update @dsh-external/dsh-deep-research`（同样转发 pnpm 并自动维护 bundles 列表）。
+卸载与更新：`dsh plugin --profile web remove|update dsh-deep-research`（同样转发 pnpm 并自动维护 bundles 列表）。
 
 ## 3. 替换 v1
 
@@ -38,7 +38,7 @@ v2 与上游 v1 使用**同名工具 `deep_research`**。同一会话同时加�
 本包通过 `node_modules/` 目录联接（junction）对齐 harness 依赖后即可离线构建与测试（Windows 无需管理员）：
 
 ```
-dsh-deep-research-hybrid/node_modules/
+dsh-deep-research/node_modules/
 ├── cordis                       → ../../deepseek-harness/vendor/cordis
 ├── @types/node                  → deepseek-harness/node_modules/@types/node
 └── @deepseek-ai/
@@ -52,7 +52,7 @@ dsh-deep-research-hybrid/node_modules/
 
 ```bash
 npm run build     # tsc -b（含类型检查；引用 harness 预构建工程）
-npm test          # node --test tests/ （19 用例）
+npm test          # node --test tests/ （23 用例）
 npm run smoke     # scripts/smoke.mjs 快速冒烟
 ```
 

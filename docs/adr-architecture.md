@@ -2,7 +2,7 @@
 
 - 状态：已采纳（Accepted）
 - 日期：2026-02
-- 关联：ADR-0001（平台事实）、`docs/spec/deep-research-hybrid.md`、`docs/references/methodology-comparison.md`
+- 关联：ADR-0001（平台事实）、`docs/spec/dsh-deep-research.md`、`docs/references/methodology-comparison.md`
 
 ## 背景
 

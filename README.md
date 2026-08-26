@@ -1,6 +1,6 @@
-# dsh-deep-research-hybrid
+# dsh-deep-research
 
-**`@dsh-external/dsh-deep-research` v2** —— DeepSeek Harness（DSH）的深度研究编排插件。
+**`dsh-deep-research` v2** —— DeepSeek Harness（DSH）的深度研究编排插件（[github.com/cireric/dsh-deep-research](https://github.com/cireric/dsh-deep-research)）。
 
 一句自然语言即可让 agent 对复杂主题发起多源调研：规划答案空间 → 自适应多轮并行检索（盲区定向侦察、边际增益收敛）→ 率失真综合成报告 → 强制验证（有界修复环）→ 可选对抗审查。全程证据三态纪律（confirmed / uncertain / gaps），报告落盘、按需取用。
 
@@ -23,7 +23,7 @@
 **方式一 · npm registry**（本包发布后即为标准途径）
 
 ```bash
-dsh plugin --profile web add dsh-deep-research-hybrid
+dsh plugin --profile web add dsh-deep-research
 ```
 
 > 当前尚未发布到公共 npm——发布后此命令即生效（私有 registry 同理，支持 `@version`）。
@@ -31,7 +31,7 @@ dsh plugin --profile web add dsh-deep-research-hybrid
 **方式二 · GitHub 仓库**
 
 ```bash
-dsh plugin --profile web add github:<owner>/dsh-deep-research-hybrid
+dsh plugin --profile web add github:cireric/dsh-deep-research
 # 亦支持 git+https 全 URL 与 @tag/@commit 固定版本
 ```
 
@@ -40,9 +40,9 @@ dsh plugin --profile web add github:<owner>/dsh-deep-research-hybrid
 **方式三 · 本地代码（开发推荐）**
 
 ```bash
-cd dsh-deep-research-hybrid
+cd dsh-deep-research
 npm run build        # 先构建出 lib/
-dsh plugin --profile web add link:/绝对路径/dsh-deep-research-hybrid
+dsh plugin --profile web add link:/绝对路径/dsh-deep-research
 ```
 
 - `link:` 以符号链接接入：改完代码重新 build 即生效，适合本地迭代；`file:` 则为复制快照；
@@ -118,7 +118,7 @@ agent 也可以显式传参精确控制：
 | `verifierMaxRounds` | 2 | 验证修复环上限 |
 | `workspaceDir` | `<会话cwd>/.research` | 产物根目录 |
 | `backgroundMode` | background | 默认执行模式 |
-| `keepRuns` | 20 | 每会话保留最近 N 次 run 产物 |
+| `keepRuns` | 20 | 每会话保留最近 N 次 run 产物（≥1，非法整数报错） |
 
 全部键与语义：[`docs/interfaces.md`](docs/interfaces.md)；配置示例：[`docs/setup.md`](docs/setup.md)。
 
@@ -126,7 +126,7 @@ agent 也可以显式传参精确控制：
 
 ```
 src/       插件入口 + 流水线脚本 + 后台桥 + 落盘
-tests/     回归测试（vm 镜像引擎，20 用例）
+tests/     回归测试（vm 镜像引擎，23 用例）
 scripts/   冒烟 / 文档链接校验
 docs/      规格·审核·ADR·接口契约·提示词·安装·测试·产物 + 研究参考
 ```
@@ -137,7 +137,7 @@ docs/      规格·审核·ADR·接口契约·提示词·安装·测试·产物 
 | --- | --- |
 | [`docs/setup.md`](docs/setup.md) | 安装、替换 v1、开发环境、配置示例 |
 | [`docs/interfaces.md`](docs/interfaces.md) | 工具参数 / 输出 schema / 配置键权威定义 |
-| [`docs/test-plan.md`](docs/test-plan.md) | 测试策略与 20 用例清单 |
+| [`docs/test-plan.md`](docs/test-plan.md) | 测试策略与 23 用例清单 |
 | [`docs/artifacts.md`](docs/artifacts.md) | 产物布局与消费方式 |
 | [`docs/adr-architecture.md`](docs/adr-architecture.md) | 架构决策与失败隔离矩阵 |
 | [`docs/agent-prompts.md`](docs/agent-prompts.md) | 各代理提示词的设计依据 |

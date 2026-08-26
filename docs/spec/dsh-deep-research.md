@@ -2,7 +2,7 @@
 
 状态：已实现（本文档为 v2 架构规格）
 
-> 本地址：`docs/spec/deep-research-hybrid.md`（本包 `docs/spec/` 目录下）
+> 本地址：`docs/spec/dsh-deep-research.md`（本包 `docs/spec/` 目录下）
 
 > 📝 **重生成版说明（2026-02 编码事故后）**：本文为基于完整会话记录的**重生成版**——凡标注「★原文」的段落为事故前原稿逐字保留；其余章节依据会话中确立的设计决策、现行实现与两轮审核台账忠实重建，措辞可能与原稿有出入但事实一致。若原稿副本日后寻获，可覆盖本版。
 
@@ -225,7 +225,7 @@ ctx.jobs.start({
 
 ## Further Notes（★原文 L263-274）
 
-- **兼容性定位**：本规格是 `@dsh-external/dsh-deep-research` 的 v2 架构（同包名，工具名 `deep_research` 兼容）。上游 v1 的 `ctx.workflows` 接缝在当前 DSH 上无法加载，v2 统一走 `ctx.workflowEngine`。
+- **兼容性定位**：本规格的前身是上游 `@dsh-external/dsh-deep-research` v1——其 `ctx.workflows` 接缝在当前 DSH 上无法加载，v2 统一走 `ctx.workflowEngine`。本项目现以独立包名 **`dsh-deep-research`** 维护于 `github.com/cireric/dsh-deep-research`，工具名 `deep_research` 保持兼容。
 - **设计出处**：Claude 工程骨架（orchestrator-worker、后台任务、verifier `unverified/refuted` 状态机、文件交接防上下文膨胀、effort 伸缩）→ Anthropic 工程博客《How we built our multi-agent research system》与 Claude Code CHANGELOG、官方 Cookbook 研究代理提示词；dsh 机制（答案空间/验收标准、Ashby 维度与 coverage_gaps 盲区侦察、三态证据、EIG 边际增益收敛、率失真综合、对抗性审查、模型分层）→ 上游 `src/index.ts` 与 README。逐项对比见 `docs/references/methodology-comparison.md`（本包内）。
 - **已落定的审核结论（对应 spec-review-report.md 的 A1/A2/A3/B1/B3/C3/C5）**：
   - A1：`ctx.jobs.start` 用 `run: () => JobHooks` 函数形态 + `JobKindMap` 声明合并（jobId 前缀 `deep-research-N`）+ `owner: exec.agent`；`inject` 含 `jobs`。

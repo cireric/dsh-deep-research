@@ -1,5 +1,7 @@
 # 审核报告 — `.specs/deep-research-hybrid.md`
 
+> 更名说明：审核时项目代号为 deep-research-hybrid（规格现位于 `docs/spec/dsh-deep-research.md`），包名现为独立包 `dsh-deep-research`。以下为历史记录，保留当时称谓。
+
 审核对象：`.specs/deep-research-hybrid.md`（v2 架构，Claude 工程骨架 × dsh 机制）
 
 **审核方法**：不评价写作风格，只反向核对规格中每个**技术断言**是否与 DSH 平台实际源码能力吻合；凡引用了接缝的地方，回查对应包的 `src/` 类型/契约。已核对的源码：`packages/workflow/workflow`（index/types/runtime-types）、`workflow-worker-thread`（runtime/host/types）、`jobs`（jobs/types）、`subagent/tool-subagent`（index）、`web/tool-web`（index/search/fetch）。

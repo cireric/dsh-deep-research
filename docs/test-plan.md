@@ -10,7 +10,7 @@
 
 未覆盖（诚实声明）：真实 LLM/真实 web 工具的端到端质量、长上下文综合的实测体积（spec 开放项③④）、`dsh plugin add` 的加载验收、宿主 `execute()` 前台降级分支与 schema 扩展（评审 F1/F2/F3 —— vm 镜像只覆盖 SCRIPT 与 jobs 桥层，宿主路径靠 tsc 门禁 + 活环境首跑）——见 §5。
 
-## 2. 用例清单（20，全绿）
+## 2. 用例清单（23，全绿）
 
 ### 流水线场景（T6 规格 + 评审后优化 ⑦）
 
@@ -35,6 +35,14 @@ kind/owner/同步 hooks；completed 结算含 finalize 摘要、监听卸载、d
 
 sanitize 后路径 = `<base>/<安全 sessionId>/<安全 runId>`；七类文件按布局生成；rounds/N-M.json 按 round 内序号；空 review 不产 review.md；keepRuns=2 修剪最旧；workspaceDir 解析（显式优先 / 默认拼 `.research`）。
 
+### 评审修复回归（review-fix batch）
+
+| 用例 | 断言要点 |
+| --- | --- |
+| plan 缺失降级 | `persistArtifacts(plan: undefined)` 不抛错：report.md 照常落盘、plan.json 写为 JSON null（单字段缺失不再放大为整批落盘失败） |
+| 全点段穿越加固 | sessionId/runId 为 `..`/`...` 时归占位符 `unnamed`，产物目录不越出 workspace 根 |
+| 问题编号无歧义剥离 | 点号+空白/顿号/右括号剥离；"3.14 是什么"、"2.0版本…"、紧凑 "1.甲" 均原样保留（旧实现误剥小数前缀） |
+
 ### 接缝静态断言
 
 入口文件声明 `interface JobKindMap { 'deep-research': 'deep-research' }`。
@@ -50,7 +58,7 @@ npm run build                   # tsc -b 类型门禁（先于此计划任何改
 
 ## 4. 变更守则
 
-- 改 `src/script.ts`：先跑 smoke 再跑全套；新增分支必须补对应 label 的假体与断言（保持 20+N 全绿）。
+- 改 `src/script.ts`：先跑 smoke 再跑全套；新增分支必须补对应 label 的假体与断言（保持 23+N 全绿）。
 - 改宿主桥/落盘：相应 fake 或 tmpdir 用例同步扩展。
 - 升级 harness：重跑 `docs/references/platform-seam-verification.md` 断言清单（ADR-0001 的平台事实可能漂移，尤其 jobs 终态词表与 schema 子集）。
 - ⚠️ 环境守则：本机 PowerShell 默认编码非 UTF-8——**禁止用 Set-Content/Get-Content 处理含中文文件**，一律使用会话 write/edit 工具或显式 `[System.Text.Encoding]::UTF8`（2026-02 编码事故教训，见工单「编码事故记录」）。

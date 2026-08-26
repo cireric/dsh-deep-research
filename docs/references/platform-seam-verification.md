@@ -1,4 +1,6 @@
-# Platform-Seam Verification — `dsh-deep-research-hybrid`
+# Platform-Seam Verification — `dsh-deep-research`
+
+> 更名说明：本文写作时项目目录名为 `dsh-deep-research-hybrid`，现统一为独立包 `dsh-deep-research`（github.com/cireric/dsh-deep-research）。
 
 Independent re-verification of the spec's platform-API claims against the actual
 DeepSeek Harness source at `D:\Project\source\__TEST__\deepseek-harness`.

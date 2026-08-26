@@ -6,7 +6,7 @@
 
 | 项 | 值 |
 | --- | --- |
-| 包名 | `@dsh-external/dsh-deep-research`（v2.0.0，private） |
+| 包名 | `dsh-deep-research`（v2.0.0，private；github.com/cireric/dsh-deep-research） |
 | 插件名 | `dsh-deep-research` |
 | inject | `['tools', 'workflowEngine', 'jobs']` |
 | bundle patch | `cordis.patch.yml`（由 package.json `dsh.bundle.patch` 声明，向 profile 插入一行） |
@@ -19,7 +19,7 @@
 | --- | --- | --- | --- |
 | `topic` | string（必填） | — | 研究主题；空串报错 |
 | `purpose` | string | 无 | 研究用途（定义答案空间） |
-| `questions` | string | 无 | 每行一个的已有问题清单；非空时跳过规划代理 |
+| `questions` | string | 无 | 每行一个的已有问题清单；非空时跳过规划代理。行首列表编号仅在无歧义时剥离：点号编号须后跟空白（防误伤 "3.14 是什么"），顿号/右括号可省空白 |
 | `depth` | number | 2 | 1/2/3；>3 报错；决定自适应轮数上限 depth+1 |
 | `synthesize` | boolean | true | false 时跳过综合代理，仅轻量验证证据、不产报告 |
 | `verify` | boolean | true | false 跳过验证环 |
@@ -41,7 +41,7 @@
 
 ### Config 键
 
-`subagentProvider? / plannerModel? / researcherModel? / synthesizerModel? / verifierModel? / reviewerModel?(缺省=synthesizerModel) / maxParallel(4) / maxTotalAgents?(不写请求则用引擎默认) / searchBudget(6；生效预算再与 LIMIT(depth)=2/3/4 取小) / verifierMaxRounds(2) / maxItemsPerCall(4096) / workspaceDir?(默认 <session.header.cwd>/.research) / backgroundMode('background') / keepRuns(20) / rawNotes(保留,no-op)`
+`subagentProvider? / plannerModel? / researcherModel? / synthesizerModel? / verifierModel? / reviewerModel?(缺省=synthesizerModel) / maxParallel(4) / maxTotalAgents?(不写请求则用引擎默认) / searchBudget(6；生效预算再与 LIMIT(depth)=2/3/4 取小) / verifierMaxRounds(2) / maxItemsPerCall(4096) / workspaceDir?(默认 <session.header.cwd>/.research) / backgroundMode('background') / keepRuns(≥1,默认20) / rawNotes(保留,no-op)`
 非法整数一律抛错；模型键仅在显式配置时写入 `args.models`。
 
 ## 3. SCRIPT args 注入契约（宿主 → 脚本）
@@ -77,7 +77,9 @@
 }
 ```
 
-宿主对缺失/漂移字段的防御：数字归 0、数组归 []、字符串归 ''，verification.status 兜底 'unknown'。
+宿主对缺失/漂移字段的防御：数字归 0、数组归 []、字符串归 ''，verification.status 兜底 'unknown'；`plan` 缺失兜底 `null`（不再让单字段缺失放大为整批落盘失败）。
+
+`verification.status='failed'` 的场景语义：synthesize=true 时表示修复环耗尽仍未收敛；synthesize=false（R4 轻量分支）时表示验证判定证据不可接受、该分支不提供修订。两态共用词表是既定取舍，明细一律以 `issues[]` 为准。
 
 ## 5. 后台桥（startBackgroundRun）
 

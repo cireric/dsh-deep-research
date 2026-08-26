@@ -1,6 +1,7 @@
-# 实现工单计划（deep-research-hybrid v2）
+# 实现工单计划（dsh-deep-research v2）
 
-> 来源：spec `docs/spec/deep-research-hybrid.md` 的 Further Notes + 复审修订（R1–R4、A1–A3、B1–B3）。
+> 更名说明：立项时项目代号为 `deep-research-hybrid`（包名 `@dsh-external/dsh-deep-research`），现统一为独立包 **`dsh-deep-research`**（github.com/cireric/dsh-deep-research）；下文历史记录保留当时称谓。
+> 来源：spec `docs/spec/dsh-deep-research.md` 的 Further Notes + 复审修订（R1–R4、A1–A3、B1–B3）。
 > 风格：每张工单自包含、声明 blocking edges，blocker-first 推进。
 
 ## 依赖前置（T0，✅ 已完成）
@@ -96,5 +97,5 @@ spec/ 与 references/ 移入 docs/ 下（docs/spec/、docs/references/），根�
 PowerShell `Set-Content` 默认编码把 8 个含中文的 md 写坏（UTF-8 被 ANSI 误读，中文大量不可逆替换）。处置：
 - 完好 14 个 md 未受影响；
 - **从会话上下文逐字重建 5 个**：本工单、README、adr-platform-caps、adr-architecture、test-plan（内容与事故前一致，路径为新结构）；
-- **基于会话记录完整重生成 3 个**（用户确认）：`docs/spec/deep-research-hybrid.md`、`docs/references/methodology-comparison.md`、`docs/spec/spec-rereview-report.md`——各文件头注标明「重生成版」：事故前原文段落逐字保留并标「★原文」，其余章节按会话确立的事实与现行实现忠实重建（措辞非原稿逐字）。若外部寻获原副本可覆盖恢复。
+- **基于会话记录完整重生成 3 个**（用户确认）：`docs/spec/dsh-deep-research.md`（时名 deep-research-hybrid.md）、`docs/references/methodology-comparison.md`、`docs/spec/spec-rereview-report.md`——各文件头注标明「重生成版」：事故前原文段落逐字保留并标「★原文」，其余章节按会话确立的事实与现行实现忠实重建（措辞非原稿逐字）。若外部寻获原副本可覆盖恢复。
 - 环境守则已写入 test-plan §4：禁止 Set-Content/Get-Content 处理含中文文件。
