@@ -16,17 +16,46 @@
 | `@deepseek-ai/dsh-jobs-local` | 后台任务注册与完成通知 | 后台模式必需 |
 | Node.js ^22.19 \|\| >=24 | 运行时 | 必需 |
 
-### 步骤
+### 三种安装方式
 
-1. 将本包置于 profile 可访问的位置（或发布到你的私有 registry）；
-2. 在 agent profile 的 `dsh.profile.bundles` 中加入 `@dsh-external/dsh-deep-research` —— 包内 `cordis.patch.yml` 会自动向该 profile 插入插件行；
-3. 确保 peer 依赖在加载方可解析（`cordis`、`@deepseek-ai/dsh-tools|dsh-workflow|dsh-jobs|dsh-agent`），通常经宿主 node_modules 或工作区链接提供。
+`dsh plugin` 是 profile 内 pnpm 的薄封装：安装后自动把声明了 bundle patch 的包挂入 profile 层栈；`remove` / `update` 同理转发。
 
-也可用 CLI 按路径安装：`dsh plugin --profile <name> add <本包路径>`。
+**方式一 · npm registry**（本包发布后即为标准途径）
 
-> ⚠️ 与上游 v1 同名工具 `deep_research`：同一 profile 请勿同时启用两者。
+```bash
+dsh plugin --profile web add dsh-deep-research-hybrid
+```
 
-完整说明（含仓库内开发环境、配置示例、卸载）：见 [`docs/setup.md`](docs/setup.md)。
+> 当前尚未发布到公共 npm——发布后此命令即生效（私有 registry 同理，支持 `@version`）。
+
+**方式二 · GitHub 仓库**
+
+```bash
+dsh plugin --profile web add github:<owner>/dsh-deep-research-hybrid
+# 亦支持 git+https 全 URL 与 @tag/@commit 固定版本
+```
+
+⚠️ git 托管插件在安装时经 **prepare 脚本构建**，pnpm ≥10 默认拦截 build script——按 pnpm 报错提示把它打印的 key 加入 profile 目录下 `pnpm-workspace.yaml` 的 `allowBuilds`，再重跑同一命令即可。
+
+**方式三 · 本地代码（开发推荐）**
+
+```bash
+cd dsh-deep-research-hybrid
+npm run build        # 先构建出 lib/
+dsh plugin --profile web add link:/绝对路径/dsh-deep-research-hybrid
+```
+
+- `link:` 以符号链接接入：改完代码重新 build 即生效，适合本地迭代；`file:` 则为复制快照；
+- 裸相对路径（如在 checkout 内 `add .`）会被自动锚定到你调用命令的目录；
+- 卸载与更新：`dsh plugin --profile web remove|update <包名>`。
+
+### 通用说明
+
+- peer 依赖（`cordis`、`@deepseek-ai/dsh-tools|dsh-workflow|dsh-jobs|dsh-agent`）需在加载方可解析（宿主 node_modules 或工作区链接提供）。
+- 安装成功的判据：插件自动出现在 profile 清单的 `dsh.profile.bundles` 列表（依据 package.json 的 `dsh.bundle.patch` 声明）。
+- ⚠️ 与上游 v1 同名工具 `deep_research`：同一 profile 请勿同时启用两者。
+
+更多细节（仓库内开发的 node_modules 联接、逐键配置示例）：[`docs/setup.md`](docs/setup.md)。
 
 ## 使用说明
 

@@ -9,16 +9,25 @@
 
 ## 2. 安装（作为 bundle patch 包）
 
-1. 把本目录放到 profile 可达的位置（或发布到你的私有 registry）。
-2. 在 agent profile 的 `dsh.profile.bundles` 中加入 `@dsh-external/dsh-deep-research`；包内 `cordis.patch.yml` 会自动向该 profile 插入：
+三种来源任选其一（`dsh plugin` 是 profile 内 pnpm 的薄封装，安装后自动依据 package.json 的 `dsh.bundle.patch` 声明把本包挂入 profile bundles 层；完整说明见 README「安装」）：
 
-   ```yaml
-   - insert:
-       - id: dsh-deep-research
-         name: '@dsh-external/dsh-deep-research'
-   ```
+```bash
+dsh plugin --profile web add dsh-deep-research-hybrid                   # 方式一：npm registry（本包发布后）
+dsh plugin --profile web add github:<owner>/dsh-deep-research-hybrid    # 方式二：GitHub（pnpm ≥10 需按提示放行 prepare 构建）
+dsh plugin --profile web add link:/abs/path/to/dsh-deep-research-hybrid # 方式三：本地（先在本包 npm run build 出 lib/）
+```
 
-3. peer 依赖需在加载方可解析：`cordis`、`@deepseek-ai/dsh-tools`、`@deepseek-ai/dsh-workflow`、`@deepseek-ai/dsh-jobs`、`@deepseek-ai/dsh-agent`（类型面）。在本仓库外安装时由宿主 node_modules/workspace 链接提供；仓库内开发见 §4。
+等价于手动向 profile 插入如下行：
+
+```yaml
+- insert:
+    - id: dsh-deep-research
+      name: '@dsh-external/dsh-deep-research'
+```
+
+peer 依赖需在加载方可解析：`cordis`、`@deepseek-ai/dsh-tools`、`@deepseek-ai/dsh-workflow`、`@deepseek-ai/dsh-jobs`、`@deepseek-ai/dsh-agent`。在本仓库外安装时由宿主 node_modules/workspace 链接提供；仓库内开发见 §4。
+
+卸载与更新：`dsh plugin --profile web remove|update @dsh-external/dsh-deep-research`（同样转发 pnpm 并自动维护 bundles 列表）。
 
 ## 3. 替换 v1
 
