@@ -1,6 +1,6 @@
 # Claude Code CHANGELOG — deep-research / verifier 摘录
 
-> 来源：anthropics/claude-code CHANGELOG.md（全量原件已收编为同目录 `claude-code-CHANGELOG-full.md`）。
+> 来源：anthropics/claude-code CHANGELOG.md（全量原件存档已移除，本摘录保留溯源条目）。
 > 说明：以下为从官方 CHANGELOG 中节选的、与 deep-research / verifier / Fetch-phase 直接相关的条目，
 > 供本文档对 Claude 原生 deep-research 方法论的引证使用。非连续全文摘录，已标注原行号以便溯源。
 

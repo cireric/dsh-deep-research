@@ -38,4 +38,4 @@ v1 上游以 `ctx.workflows` 接缝编写，在当前 DSH 上无法加载；v2 �
 - 代价：核验结论绑定当前 harness 版本；升级 harness 时应重跑 `docs/references/platform-seam-verification.md` 的断言清单（其引用均带文件:行号）。
 - 已知开放项（继承 spec）：workflow 子代理工具世界是否含 `web_fetch` 由组合决定——verifier 提示词按两种情况都写了降级行为（B1），无需代码分支。
 
-> 注（编码事故重建）：本文件曾因 PowerShell 默认编码写入事故损坏，已从会话上下文逐字重建（内容与事故前一致，路径已更新为 docs/ 新结构）。
+> 注（编码事故重建）：本文件曾因 PowerShell 默认编码写入事故损坏，已从会话上下文逐字重建（内容与事故前一致。现行位置：docs/adr/0001-platform-caps.md）。

@@ -2,7 +2,7 @@
 
 > 研读方式：五个开源实现的浅克隆逐文件通读（研读日即本笔记写作日），按统一七维清单分析；
 > 各仓完整分析经多代理并行产出，本文为交叉蒸馏。对照基准 = 本包 v2 设计
-> （docs/spec/dsh-deep-research.md + docs/adr-architecture.md）。
+> （docs/adr/0002-v2-architecture.md + docs/interfaces.md；v2 规格文档已于 2026-09 退役归并）。
 > 缺席说明：liangdabiao/Deep-Research 多个地址变体均克隆失败（疑改名/删除），未参与本次横评。
 
 ## 一、样本概览

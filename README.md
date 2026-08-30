@@ -150,7 +150,11 @@ agent 也可以显式传参精确控制：
 src/       插件入口 + 流水线脚本 + 后台桥 + 落盘
 tests/     回归测试（vm 镜像引擎，23 用例）
 scripts/   冒烟 / 文档链接校验
-docs/      规格·审核·ADR·接口契约·提示词·安装·测试·产物 + 研究参考
+CONTEXT.md  领域词汇表（单一上下文）
+src/       插件入口 + 流水线脚本 + 后台桥 + 落盘
+tests/     回归测试（vm 镜像引擎，23 用例）
+scripts/   冒烟 / 文档链接校验
+docs/      决策(adr/)·接口契约·提示词·安装·测试·产物 + 研究参考
 ```
 
 ## 文档索引
@@ -161,7 +165,8 @@ docs/      规格·审核·ADR·接口契约·提示词·安装·测试·产物 
 | [`docs/interfaces.md`](docs/interfaces.md) | 工具参数 / 输出 schema / 配置键权威定义 |
 | [`docs/test-plan.md`](docs/test-plan.md) | 测试策略与 23 用例清单 |
 | [`docs/artifacts.md`](docs/artifacts.md) | 产物布局与消费方式 |
-| [`docs/adr-architecture.md`](docs/adr-architecture.md) | 架构决策与失败隔离矩阵 |
+| [`CONTEXT.md`](CONTEXT.md) | 领域词汇表（单一上下文） |
+| [`docs/adr/`](docs/adr/) | 架构决策：ADR-0001 平台接缝 / ADR-0002 v2 架构与失败隔离矩阵 |
 | [`docs/agent-prompts.md`](docs/agent-prompts.md) | 各代理提示词的设计依据 |
 | [`docs/references/community-comparison.md`](docs/references/community-comparison.md) | 五个社区实现横评与改进候选 |
 

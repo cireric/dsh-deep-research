@@ -2,11 +2,11 @@
 
 - 状态：已采纳（Accepted）
 - 日期：2026-02
-- 关联：ADR-0001（平台事实）、`docs/spec/dsh-deep-research.md`、`docs/references/methodology-comparison.md`
+- 关联：ADR-0001（平台事实）
 
 ## 背景
 
-用户需要同一插件内同时吸收 Claude 原生 deep-research 的工程骨架与 dsh v1 的机制设计，并规避两者短板（v1：质量保障可选且不给意见、无强制验证、无盲区结构；Claude：验证误报风险、上下文膨胀）。形态决策已由用户拍板：做成 **DSH 插件（Cordis）而非 skill**；触发方式为**模型按描述自然语言触发的工具**（无 slash command）。
+用户需要同一插件内同时吸收 Claude 原生 deep-research 的工程骨架与 dsh v1 的机制设计，并规避两者短板（v1：质量保障可选且不给意见、无强制验证、无盲区结构；Claude：验证误报风险、上下文膨胀）。形态决策已由用户拍板：做成 **DSH 插件（Cordis）而非 skill**；触发方式为**模型按描述自然语言触发的工具** + **用户面 `/deep-research` 命令直达**（宿主直执行、不经模型——用户要求提供主动触发机制，命令面于 2026-08 追加，见下方修订记录）。
 
 ## 决策
 
@@ -54,11 +54,20 @@
 1. 规格的 `deep-research/*` 自建 recorder 简化为直接复用引擎原生 `workflow/*` 事件（ADR-0001 #10）+ job readOutput 进度流。
 2. `rawNotes` 配置键保留但 v2.0 为 no-op（依赖 writable 工具世界，spec 开放项②）。
 
+### D8. 非目标（2026-09 spec 退役补记）
+
+1. 不做可视化/图表输出（文本报告之外的能力，与工具定位无关）。
+2. 不做多引擎抽象——绑定官方 workflow 引擎；演进出口只在 `resolveWorkflowEngine` 一处（docs/engine-resolution.md §五）。
+3. 企业内部信息源接入不在本插件范围（依赖宿主工具世界的组合事实，与 spec 开放项②同源）。
+
 > 修订记录（评审后优化轮）：原偏差「LIMIT(depth) 未实现」已落实为 `agentBudget = min(searchBudget, LIMIT(depth))`（src/script.ts，回归 ⑦）；前台取消改为结构化 `degraded` 负载（D6 表同步）。
+> 追加（2026-08-30）：① 用户面 `/deep-research` 命令（与工具共用 runResearch 内核，默认后台、`--foreground` 翻转；实现见 src/command.ts + src/index.ts 命令面）；② D1 引擎解析落实为调用期 `resolveWorkflowEngine` 三链（serviceForAgent 官方 READ 寻址优先——isolate 组实例对 agent 根 ctx 与 host 均不可见，加载期 inject 会导致 root 永久 pending；求证过程与机制见 docs/engine-resolution.md）。
+> 追加（2026-09 spec 退役）：docs/spec 目录（v2 规格、两轮审核报告）已删除——决策职能迁归：架构决策=本文件+ADR-0001，接口契约=docs/interfaces.md，测试策略=docs/test-plan.md，提示词设计=docs/agent-prompts.md，产物语义=docs/artifacts.md；既往审核结论（A1-A3/B1/B3/C3/C5、R1-R7）均已落实于上述文档，D8 补记非目标。
+> 追加（2026-09 参考精简）：docs/references/ 中 methodology-comparison.md（设计对比研究记录，结论已固化于本文件与 agent-prompts.md）与 implementation-tickets.md（完成台账，事故教训已入 test-plan.md §4）一并退役；保留 platform-seam-verification.md（ADR-0001 复核清单）、community-comparison.md（B1-B4 候选清单）、anthropic/ 一手材料、upstream-v1/（v1 快照+许可）。
 
 ## 后果
 
 - 正面：编排可整段回归测试；质量保障强制且诚实降级；上下文膨胀有三重缓解（分批切片、证据精简、指针交付）。
 - 代价：脚本字符串不可 import 复用（vm 形态固有）；宿主桥接层（T4/T5）承担了 Claude 式"文件交接/后台任务"的全部工程量。
 
-> 注（编码事故重建）：本文件曾因 PowerShell 默认编码写入事故损坏，已从会话上下文逐字重建（内容与事故前一致，路径已更新为 docs/ 新结构）。
+> 注（编码事故重建）：本文件曾因 PowerShell 默认编码写入事故损坏，已从会话上下文逐字重建（内容与事故前一致。现行位置：docs/adr/0002-v2-architecture.md）。

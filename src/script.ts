@@ -5,7 +5,7 @@
  *   agent(prompt, opts?) / parallel(thunks) / pipeline(items, ...stages) / phase(title) / log(msg) / args
  * 无 fs、无网络、无 Node API；agent() 选项仅 label/phase/schema/provider/model。
  *
- * 落实规格条目（docs/spec/dsh-deep-research.md）：
+ * 落实 v2 规格条目（决策记录见 docs/adr/）：
  *   - 流水线状态机：规划 → 研究(自适应闭环) → 综合 → 验证+修复环 → 可选审查（A3 单一时序）；
  *   - R3 切片：每轮子问题按 min(maxParallel, maxItemsPerCall) 切片，逐切片 parallel()（防 ITEM_CAP 致命失败）；
  *   - R4 分支：synthesize=false 时跳过综合，改为对中间证据轻量验证、不产 report；

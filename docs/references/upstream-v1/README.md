@@ -1,4 +1,6 @@
-# @dsh-external/dsh-deep-research
+# @dsh-external/dsh-deep-research（历史快照）
+
+> ⚠️ **只读历史快照（v1）**：本目录是上游 v1 实现的整理快照（commit c0b329e），用于溯源取证与许可合规，**不是当前实现**——其 `ctx.workflows` 接缝在当前 DSH 上无法加载。当前 v2 的安装/用法见根 README 与 `docs/setup.md`；架构决策见 `docs/adr/`。
 
 把 deep-research 流程做成 **DSH 扩展插件**（plugin，与 skill 体系分开），
 基于 **DSH 官方 workflow 引擎**（`ctx.workflows` / `@deepseek-ai/dsh-workflow-workerthread`）
