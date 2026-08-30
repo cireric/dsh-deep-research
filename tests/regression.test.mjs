@@ -709,3 +709,70 @@ test('question list parsing: numbering stripped only when unambiguous (review fi
   assert.deepEqual(parseQuestionList('\n  \n甲\n'), [{ question: '甲' }])
   assert.deepEqual(parseQuestionList(undefined), [])
 })
+
+// ════════════════════════════════════════════════════════════════════════════
+// ⑧ workflowEngine 为调用期能力：经 resolveWorkflowEngine 三链解析
+// （OMDSH 上游 PR#5 方案的 Web 化升级版）。
+// web/production preset 把引擎 isolate 在会话 delegation 组内，root 无实例，
+// 且 entry-local realm 对 agent 根 ctx 与 host 平面均不可见——因此既不能加载期
+// inject（root 挂载会永久 pending），也不能只靠 exec.agent.ctx.get()。解析链：
+//   ① serviceForAgent(ctx, parent, 'workflowEngine')（官方 READ 寻址，真实运行时
+//      命中 isolate 组实例；桩 ctx 无 scope/reflect 时宽松降级）；
+//   ② exec.agent.ctx.get('workflowEngine')（引擎直接注册在 agent 作用域的部署）；
+//   ③ ctx.get('workflowEngine')（host 平面挂载）。
+// ════════════════════════════════════════════════════════════════════════════
+
+test('⑧ inject 不含 workflowEngine；调用时经解析链取引擎；缺失报明确错误', async () => {
+  // index.ts 有裸导入（@deepseek-ai/dsh-tools），data-URL 方式解析不了；
+  // 直接以 Node 原生类型剥离加载真实模块（Node >= 22.18）。
+  const idxUrl = new URL('../src/index.ts', import.meta.url).href
+  const { apply, inject } = await import(idxUrl)
+  assert.deepEqual(inject, ['tools', 'jobs', 'commands'], 'workflowEngine 不参与加载期 inject（root 无实例，注入会挂死）')
+  let registered
+  const hostCtx = { tools: { register: (def) => { registered = def } }, effect: () => () => {} }
+  apply(hostCtx, {})
+  assert.ok(registered, 'deep_research 工具已注册')
+  const base = await mkdtemp(path.join(tmpdir(), 'ddr-engine-scope-'))
+  try {
+    const agentOf = (get) => ({ id: 'a1', session: { header: { cwd: base } }, ctx: { get } })
+    const execOf = (agent) => ({ agent, signal: new AbortController().signal })
+    const fakeEngineFor = (started) => ({
+      start: (request) => {
+        started.push(request)
+        return {
+          id: 'run-1',
+          result: Promise.resolve({ stopReason: 'completed', value: { report: '# r' } }),
+          cancel: () => {},
+          dispose: async () => {},
+        }
+      },
+    })
+    // a) 全部作用域无引擎（且桩 ctx 无 reflect——serviceForAgent 须宽松降级）→ 明确错误
+    await assert.rejects(
+      () => registered.execute({ topic: 't', background: false }, execOf(agentOf(() => undefined))),
+      /workflowEngine unavailable/,
+    )
+    // b) ②链：agent 作用域有引擎 → 走该会话私有引擎实例（而非宿主 ctx）
+    const startedB = []
+    const agentB = agentOf((name) => (name === 'workflowEngine' ? fakeEngineFor(startedB) : undefined))
+    const valueB = await registered.execute({ topic: 't', background: false }, execOf(agentB))
+    assert.equal(startedB.length, 1, '②链：引擎 start 恰好一次')
+    assert.equal(startedB[0].parent, agentB, 'parent 为调用者 agent')
+    assert.equal(valueB.ok, true)
+    assert.equal(valueB.status, 'completed')
+    // c) ③链：agent 作用域为空、host 平面挂载引擎 → 回退命中（serviceForAgent 对无
+    //    scope 桩安全降级后继续走 ②/③）
+    const startedC = []
+    const hostWithEngine = {
+      tools: { register: (def) => { registered = def } },
+      effect: () => () => {},
+      get: (name) => (name === 'workflowEngine' ? fakeEngineFor(startedC) : undefined),
+    }
+    apply(hostWithEngine, {})
+    const valueC = await registered.execute({ topic: 't', background: false }, execOf(agentOf(() => undefined)))
+    assert.equal(startedC.length, 1, '③链：host 平面引擎被采用')
+    assert.equal(valueC.status, 'completed')
+  } finally {
+    await rm(base, { recursive: true, force: true })
+  }
+})

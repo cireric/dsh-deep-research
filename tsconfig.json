@@ -15,6 +15,9 @@
       "path": "../../deepseek-harness/packages/core/agent"
     },
     {
+      "path": "../../deepseek-harness/packages/preset/agent-presets"
+    },
+    {
       "path": "../../deepseek-harness/packages/core/tools"
     },
     {
@@ -22,6 +25,9 @@
     },
     {
       "path": "../../deepseek-harness/packages/jobs/jobs"
+    },
+    {
+      "path": "../../deepseek-harness/packages/interaction/commands"
     }
   ]
 }

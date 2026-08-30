@@ -8,7 +8,7 @@
 | --- | --- |
 | 包名 | `dsh-deep-research`（v2.0.0，private；github.com/cireric/dsh-deep-research） |
 | 插件名 | `dsh-deep-research` |
-| inject | `['tools', 'workflowEngine', 'jobs']` |
+| inject | `['tools', 'jobs', 'commands']`（workflowEngine 为**调用期**能力：官方 preset 把引擎 isolate 在会话 delegation 组内、root 与 agent 根 ctx 均无实例，加载期注入会使 root 挂载条目永久 pending。调用期经 `resolveWorkflowEngine` 三链解析：① `serviceForAgent(ctx, parent, 'workflowEngine')`（官方 READ 寻址 preset standing mount，命中 isolate 组实例）→ ② `exec.agent.ctx.get('workflowEngine')` → ③ host 平面 `ctx.get`；全部缺失时报明确错误） |
 | bundle patch | `cordis.patch.yml`（由 package.json `dsh.bundle.patch` 声明，向 profile 插入一行） |
 
 ## 2. 工具 `deep_research`

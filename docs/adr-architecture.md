@@ -12,7 +12,7 @@
 
 ### D1. 单工具入口 + 静态 SCRIPT
 
-对外仅暴露一个 `deep_research` 工具；编排逻辑是**一个静态脚本常量**（`src/script.ts` 的 `RESEARCH_SCRIPT`），经 `ctx.workflowEngine.start({ script, meta, args, parent, signal })` 执行。
+对外仅暴露一个 `deep_research` 工具；编排逻辑是**一个静态脚本常量**（`src/script.ts` 的 `RESEARCH_SCRIPT`），经调用期解析到的 `resolveWorkflowEngine(ctx, parent).start({ script, meta, args, parent, signal })` 执行（引擎不由加载期 inject——官方 preset 将其 isolate 在会话 delegation 组内，宿主侧调用者须用 dsh-agent-presets 的 `serviceForAgent` READ 寻址命中组内实例）。
 理由：静态脚本是引擎 vm 沙箱的唯一合法形态；把全部编排放进一个可被 vm 镜像 harness 原样执行的字符串，使回归测试不需要 mock 宿主（T6 的直接收益）。
 
 ### D2. 五阶段流水线 + 单一验证时序（A3）

@@ -9,18 +9,30 @@
  *   - T4 产物落盘在 src/artifacts.ts（<workspaceDir>/<sessionId>/<runId>/ + keepRuns）；
  *   - T5 后台执行在 src/background.ts（ctx.jobs，kind 'deep-research'）。
  *
- * 服务接缝（经 references/platform-seam-verification.md 核验）：
- *   inject: ['tools', 'workflowEngine', 'jobs']
- *   ctx.workflowEngine.start({ script, meta, args, parent, signal, subagentProvider?, maxTotalAgents? })
+ * 服务接缝（加载期只注入 host-plane 服务；workflowEngine 是调用期能力，经调用者
+ * agent 作用域解析——官方 preset 将其 isolate 在会话 delegation 组内，root 无实例，
+ * 加载期注入会让 root 挂载条目永久 pending（对照 omdsh 上游 issue #3 / PR #5））：
+ *   inject: ['tools', 'jobs', 'commands']
+ *   调用期解析链（resolveWorkflowEngine）：
+ *     ① serviceForAgent(ctx, parent, 'workflowEngine')——官方 READ 寻址，从 preset
+ *        standing mount 取组内实例（entry-local realm 对 agent 根 ctx 与 host 均
+ *        不可见，这是唯一能命中 isolate 组引擎的宿主侧通道）；
+ *     ② exec.agent.ctx.get('workflowEngine')——引擎直接注册在 agent 作用域的部署；
+ *     ③ ctx.get('workflowEngine')——host 平面挂载。
+ *   engine.start({ script, meta, args, parent, signal, subagentProvider?, maxTotalAgents? })
  *   ctx.jobs.start({ kind:'deep-research', label, owner, run: () => JobHooks })
  *
  * @module dsh-deep-research (github.com/cireric/dsh-deep-research)
  */
 
 import { defineTool } from '@deepseek-ai/dsh-tools'
+import { serviceForAgent } from '@deepseek-ai/dsh-agent-presets'
 import type { Context } from 'cordis'
-import type { WorkflowMeta, WorkflowResult } from '@deepseek-ai/dsh-workflow'
+import type { Agent } from '@deepseek-ai/dsh-agent'
+import type { CommandInvocation, CommandResult } from '@deepseek-ai/dsh-commands'
+import type { WorkflowEngine, WorkflowMeta, WorkflowResult } from '@deepseek-ai/dsh-workflow'
 import { RESEARCH_SCRIPT } from './script.ts'
+import { parseResearchCommand } from './command.ts'
 import { persistArtifacts, pruneRuns, resolveWorkspaceDir } from './artifacts.ts'
 import type { ScriptResultShape, VerificationStatus } from './artifacts.ts'
 import { startBackgroundRun } from './background.ts'
@@ -34,7 +46,14 @@ declare module '@deepseek-ai/dsh-jobs' {
 export const name = 'dsh-deep-research'
 
 /** 激活时机：工具注册表与官方 workflow / jobs 服务可用。 */
-export const inject = ['tools', 'workflowEngine', 'jobs']
+/**
+ * 加载期只注入 host-plane 可解析的服务（tools/jobs）。workflowEngine 刻意不注入：
+ * 官方 preset（standard/code 等）把引擎 isolate 在每个会话的 delegation 组内，root
+ * 平面无实例——加载期 inject 会使 root 挂载的条目永久 pending（bundle patch 或注入器
+ * 路径甚至能拖死 loader 组）。因此引擎改为调用期从调用者 agent 作用域解析，
+ * 即每个会话自己 preset 组内的实例，见 execute()。
+ */
+export const inject = ['tools', 'jobs', 'commands']
 
 /** 规格默认值集中处（resolveConfig 的唯一事实来源；AGENTS.md：defaulting 是显式步骤）。 */
 const DEFAULTS = {
@@ -46,9 +65,6 @@ const DEFAULTS = {
   keepRuns: 20,
   backgroundMode: 'background',
 } as const
-
-/** 工具负载的运行状态词表（R1：不引入 'cancelled'，取消以前台 'degraded'/后台 killed 表达）。 */
-type RunStatus = 'completed' | 'background' | 'degraded'
 
 /** 插件配置（全部可选，缺省继承父路由 / 规格默认值）。 */
 export interface Config {
@@ -185,21 +201,309 @@ function shapeScriptResult(value: unknown): ScriptResultShape {
   }
 }
 
+/** Workflow identity shared by the tool face and the /deep-research command face. */
+const RESEARCH_META: WorkflowMeta = {
+  name: 'deep-research',
+  description: 'Adaptive deep research orchestrator (v2): plan → research → synthesize → verify → review.',
+  whenToUse: 'Deep research / investigation needing multi-source evidence and a cited report.',
+  phases: [
+    { title: '规划', detail: 'Answer-space planning: scope, dimensions, subquestions, coverage gaps' },
+    { title: '研究', detail: 'Adaptive research rounds with slicing min(maxParallel, maxItemsPerCall)' },
+    { title: '综合', detail: 'Rate-distortion synthesis into a cited report' },
+    { title: '验证', detail: 'Enforced verifier with bounded revision loop' },
+    { title: '审查', detail: 'Optional adversarial review' },
+  ],
+}
+
+/** One validated research request shared by the tool face and the command face.
+ * 运行状态词表（R1）：不引入 'cancelled'——取消以前台 'degraded'/后台 killed 表达。 */
+interface ResearchRequest {
+  topic: string
+  purpose?: string
+  questions: Array<{ question: string }>
+  depth: number
+  synthesize: boolean
+  verify: boolean
+  review: boolean
+  background: boolean
+  language: string
+}
+
+/** The payload runResearch settles with — the tool returns it verbatim; the command maps it to text. */
+type ResearchPayload =
+  | { ok: true; status: 'background'; jobId?: string; runId?: string }
+  | { ok: false; status: 'degraded'; runId: string }
+  | {
+    ok: true
+    status: 'completed'
+    reportPath?: string
+    artifactsDir?: string
+    rounds: number
+    subquestions: number
+    completed: number
+    failed: number
+    verification: {
+      status: VerificationStatus
+      claims: { verified: number; unverified: number; refuted: number }
+      issues: string[]
+    }
+  }
+
+/**
+ * 调用期解析调用者 agent 作用域内的 workflowEngine（三条链，全部宽松失败）：
+ *   1) serviceForAgent(ctx, parent, 'workflowEngine')——官方 READ 寻址（dsh-agent-presets
+ *      mount.ts）：预设把引擎 isolate 在 delegation 组内，entry-local realm 对 agent
+ *      根 ctx 与 host 平面均不可见，agent 根 ctx.get() 永远命不中；serviceForAgent 按
+ *      agent 的 scope key 找到所属 standing mount，再按 fiber 隶属在全局 store 中取回
+ *      该组的引擎实例——这是宿主侧调用者（已持有 agent）访问组内服务的官方通道，
+ *      router-standard / standard / code 等带 delegation 组的 preset 都命中此路径。
+ *   2) exec.agent.ctx.get('workflowEngine')——引擎直接注册在 agent 作用域的部署
+ *      （上游 omdsh PR #5 的挂载形态，Web 组合外的自建 preset 可能采用）。
+ *   3) ctx.get('workflowEngine')——host 平面挂载（非 Web 组合 / 老式装配）。
+ * 全部用宽松 get()/try-catch：未声明 inject 时访问器自身会抛错、桩 ctx 无 reflect 等
+ * 一律按缺失处理，最终由调用面给出明确错误。
+ */
+function resolveWorkflowEngine(ctx: Context, parent: Agent): WorkflowEngine | undefined {
+  try {
+    const fromMount = serviceForAgent(ctx, parent, 'workflowEngine')
+    if (fromMount !== undefined) return fromMount
+  } catch { /* 非 preset 部署 / 无 scope / 桩 ctx 无 reflect：按缺失处理 */ }
+  try {
+    const fromAgent = parent.ctx.get('workflowEngine') as WorkflowEngine | undefined
+    if (fromAgent !== undefined) return fromAgent
+  } catch { /* 未挂载/未声明时按缺失处理 */ }
+  try {
+    return ctx.get('workflowEngine') as WorkflowEngine | undefined
+  } catch { return undefined }
+}
+
+/**
+ * The shared execution core: engine resolution + engine-args assembly +
+ * background/foreground run + artifact persistence. The tool face validates
+ * its model args before calling; the command face parses the command line
+ * before calling. Single source of truth for both faces.
+ * @param ctx - host cordis context (jobs service for the background path).
+ * @param config - raw plugin config (workspaceDir lives only here).
+ * @param resolved - typed config from resolveConfig.
+ * @param parent - the receiving agent (owns the scoped workflowEngine).
+ * @param req - validated request.
+ * @param externalSignal - caller lifetime (tool call or command dispatch).
+ */
+async function runResearch(
+  ctx: Context,
+  config: Config,
+  resolved: ResolvedConfig,
+  parent: Agent,
+  req: ResearchRequest,
+  externalSignal: AbortSignal,
+): Promise<ResearchPayload> {
+  // workflowEngine 调用期解析（三条链见 resolveWorkflowEngine）：优先官方
+  // serviceForAgent READ 寻址（isolate 组实例对 agent 根 ctx 不可见，PR #5 场景靠它），
+  // 次级回退 agent 作用域 / host 平面。前台/后台两支路共用本实例。
+  const engine = resolveWorkflowEngine(ctx, parent)
+  if (!engine) {
+    throw new Error(
+      'deep_research: workflowEngine unavailable in the calling agent scope — '
+        + 'make sure the preset mounts a delegation group with `isolate: workflowEngine: true` '
+        + '(router-standard / standard / code), or register the engine on the agent scope '
+        + 'or host plane (resolution order: serviceForAgent -> agent.ctx -> host ctx)',
+    )
+  }
+
+  const engineArgs = {
+    topic: req.topic,
+    ...(req.purpose !== undefined ? { purpose: req.purpose } : {}),
+    ...(req.questions.length > 0 ? { questions: req.questions } : {}),
+    depth: req.depth,
+    synthesize: req.synthesize,
+    verify: req.verify,
+    review: req.review,
+    language: req.language,
+    searchBudget: resolved.searchBudget,
+    maxParallel: resolved.maxParallel,
+    verifierMaxRounds: resolved.verifierMaxRounds,
+    maxItemsPerCall: resolved.maxItemsPerCall,
+    ...(Object.keys(resolved.models).length > 0 ? { models: resolved.models } : {}),
+  }
+
+  const sessionId = String(parent.id)
+  const parentCwd: string | undefined = parent.session.header.cwd
+
+  // ---------- 后台路径（T5） ----------
+  if (req.background) {
+    let runId = ''
+    let jobId = ''
+    try {
+      jobId = String(
+        startBackgroundRun({
+          ctx,
+          jobs: ctx.jobs,
+          owner: parent,
+          label: `深度研究：${req.topic}`,
+          externalSignal,
+          onRunStarted: (id) => {
+            runId = id
+          },
+          finalize: async (result: WorkflowResult) => {
+            const shaped = shapeScriptResult(result.value)
+            const workspaceDir = resolveWorkspaceDir(config.workspaceDir, parentCwd)
+            const paths = await persistArtifacts(workspaceDir, sessionId, runId || 'unknown-run', shaped)
+            await pruneRuns(workspaceDir, sessionId, resolved.keepRuns)
+            return `status=${shaped.verification.status} rounds=${shaped.rounds} completed=${shaped.completed}/failed=${shaped.failed} report=${paths.reportPath}`
+          },
+          start: (signal) =>
+            engine.start({
+              script: RESEARCH_SCRIPT,
+              meta: RESEARCH_META,
+              args: engineArgs,
+              ...(resolved.subagentProvider !== undefined ? { subagentProvider: resolved.subagentProvider } : {}),
+              ...(resolved.maxTotalAgents !== undefined ? { maxTotalAgents: resolved.maxTotalAgents } : {}),
+              parent,
+              signal,
+            }),
+        }),
+      )
+    } catch (error) {
+      // jobs-local 未加载 / controller 未挂 / preflight 拒绝：显式报错，由调用面决定降级前台重试
+      throw new Error(
+        `dsh-deep-research: background start failed (${error instanceof Error ? error.message : String(error)})` +
+          ' — retry with foreground mode, or ensure @deepseek-ai/dsh-jobs-local is loaded',
+      )
+    }
+    const payload: Extract<ResearchPayload, { status: 'background' }> = { ok: true, status: 'background' }
+    if (jobId.length > 0) payload.jobId = jobId
+    if (runId.length > 0) payload.runId = runId
+    return payload
+  }
+
+  // ---------- 前台路径 ----------
+  const run = engine.start({
+    script: RESEARCH_SCRIPT,
+    meta: RESEARCH_META,
+    args: engineArgs,
+    ...(resolved.subagentProvider !== undefined ? { subagentProvider: resolved.subagentProvider } : {}),
+    ...(resolved.maxTotalAgents !== undefined ? { maxTotalAgents: resolved.maxTotalAgents } : {}),
+    parent,
+    signal: externalSignal,
+  })
+
+  let result: WorkflowResult
+  try {
+    result = await run.result
+  } finally {
+    await run.dispose()
+  }
+
+  // R1 取消态映射：引擎无独立 cancelled 负载语义——stopReason 'cancelled' 即取消（killed 语义），
+  // 前台按规格降级为结构化负载而非抛错（评审 F1）；'error' 是真故障，抛错携带引擎信息供重试。
+  if (result.stopReason === 'cancelled') {
+    return { ok: false, status: 'degraded', runId: String(run.id) }
+  }
+  if (result.stopReason !== 'completed') {
+    throw new Error(
+      `deep_research: workflow run ${result.stopReason}${result.error !== undefined ? ` (${result.error})` : ''}`,
+    )
+  }
+
+  const shaped = shapeScriptResult(result.value)
+
+  // T4：产物落盘（尽力而为；失败则负载退化为无指针形态，不炸工具）
+  let reportPath: string | undefined
+  let artifactsDir: string | undefined
+  try {
+    const workspaceDir = resolveWorkspaceDir(config.workspaceDir, parentCwd)
+    const paths = await persistArtifacts(workspaceDir, sessionId, String(run.id), shaped)
+    reportPath = paths.reportPath
+    artifactsDir = paths.dir
+    await pruneRuns(workspaceDir, sessionId, resolved.keepRuns)
+  } catch {
+    // 落盘失败是有意静默：前台没有进度缓冲可写，注入 logger 会扩大服务接缝依赖。
+    // 唯一信号即负载缺指针；交付证据仍在紧凑负载中，不受影响。
+  }
+
+  return {
+    ok: true,
+    status: 'completed',
+    ...(reportPath !== undefined ? { reportPath } : {}),
+    ...(artifactsDir !== undefined ? { artifactsDir } : {}),
+    rounds: shaped.rounds,
+    subquestions: shaped.subquestions,
+    completed: shaped.completed,
+    failed: shaped.failed,
+    verification: {
+      status: shaped.verification.status,
+      claims: shaped.verification.claims,
+      issues: shaped.verification.issues,
+    },
+  }
+}
+
+/**
+ * The /deep-research command face: parse the command line, run the shared
+ * core against the receiving agent, and settle with human-readable text.
+ * The receiving agent's scoped workflowEngine is resolved exactly as the
+ * tool face does; a thrown handler settles as a registry-level error, so
+ * expected failures map to explicit CommandResult errors here.
+ */
+async function executeResearchCommand(
+  ctx: Context,
+  config: Config,
+  resolved: ResolvedConfig,
+  invocation: CommandInvocation,
+): Promise<CommandResult> {
+  const parsed = parseResearchCommand(invocation.rawInput)
+  if (!parsed.ok) return { kind: 'error', text: parsed.error }
+  const parent: Agent = invocation.agent
+  // 与 runResearch 同型：调用期经 resolveWorkflowEngine 三链解析（官方 READ
+  // 寻址优先——isolate 组实例对 agent 根 ctx 不可见）。失败回报明确错误。
+  const engine = resolveWorkflowEngine(ctx, parent)
+  if (!engine) {
+    return {
+      kind: 'error',
+      text:
+        'workflow 引擎不可达：请在提供 `isolate: workflowEngine: true` delegation 组的 preset'
+        + '（router-standard / standard / code 及其衍生）下使用（解析链：'
+        + 'serviceForAgent → agent 作用域 → host 平面）。',
+    }
+  }
+  try {
+    const payload = await runResearch(
+      ctx,
+      config,
+      resolved,
+      parent,
+      {
+        topic: parsed.request.topic,
+        ...(parsed.request.purpose !== undefined ? { purpose: parsed.request.purpose } : {}),
+        questions: [],
+        depth: parsed.request.depth,
+        synthesize: parsed.request.synthesize,
+        verify: parsed.request.verify,
+        review: parsed.request.review,
+        background: !parsed.request.foreground,
+        language: 'zh',
+      },
+      invocation.signal,
+    )
+    if (payload.status === 'background') {
+      return { kind: 'success', text: `深度调研已转后台（jobId=${payload.jobId ?? '?'}），完成时将收到通知。` }
+    }
+    if (payload.status === 'degraded') {
+      return { kind: 'success', text: '深度调研已取消，未产出结果；如需继续请重新发起。' }
+    }
+    return {
+      kind: 'success',
+      text:
+        `深度调研完成（轮次 ${payload.rounds}，子问题 ${payload.subquestions}，完成 ${payload.completed}/失败 ${payload.failed}，验证=${payload.verification.status}）` +
+        (payload.reportPath !== undefined ? `\n报告已落盘：${payload.reportPath}` : ''),
+    }
+  } catch (error) {
+    return { kind: 'error', text: `深度调研失败：${error instanceof Error ? error.message : String(error)}` }
+  }
+}
+
 export function apply(ctx: Context, config: Config = {}) {
   const resolved = resolveConfig(config)
-
-  const meta: WorkflowMeta = {
-    name: 'deep-research',
-    description: 'Adaptive deep research orchestrator (v2): plan → research → synthesize → verify → review.',
-    whenToUse: 'Deep research / investigation needing multi-source evidence and a cited report.',
-    phases: [
-      { title: '规划', detail: 'Answer-space planning: scope, dimensions, subquestions, coverage gaps' },
-      { title: '研究', detail: 'Adaptive research rounds with slicing min(maxParallel, maxItemsPerCall)' },
-      { title: '综合', detail: 'Rate-distortion synthesis into a cited report' },
-      { title: '验证', detail: 'Enforced verifier with bounded revision loop' },
-      { title: '审查', detail: 'Optional adversarial review' },
-    ],
-  }
 
   ctx.tools.register(
     defineTool({
@@ -256,7 +560,8 @@ export function apply(ctx: Context, config: Config = {}) {
               },
             },
           },
-          required: ['ok', 'status'],
+          // 注：根级 required 数组不被 dsh-tools 值 schema DSL 支持（属性级
+          // required: true 已声明必填），勿加回。
         },
         render: (_args, value) => [
           {
@@ -294,141 +599,41 @@ export function apply(ctx: Context, config: Config = {}) {
         const language = typeof args.language === 'string' && args.language.trim().length > 0 ? args.language.trim() : 'zh'
         const questions = parseQuestionList(args.questions)
 
-        const engineArgs = {
-          topic,
-          ...(purpose !== undefined ? { purpose } : {}),
-          ...(questions.length > 0 ? { questions } : {}),
-          depth,
-          synthesize,
-          verify,
-          review,
-          language,
-          searchBudget: cfg.searchBudget,
-          maxParallel: cfg.maxParallel,
-          verifierMaxRounds: cfg.verifierMaxRounds,
-          maxItemsPerCall: cfg.maxItemsPerCall,
-          ...(Object.keys(cfg.models).length > 0 ? { models: cfg.models } : {}),
-        }
-
-        const sessionId = String(parent.id)
-        const parentCwd: string | undefined = parent.session.header.cwd
-
-        // ---------- 后台路径（T5） ----------
-        if (background) {
-          let runId = ''
-          let jobId = ''
-          try {
-            jobId = String(
-              startBackgroundRun({
-                ctx,
-                jobs: ctx.jobs,
-                owner: parent,
-                label: `深度研究：${topic}`,
-                externalSignal: exec.signal,
-                onRunStarted: (id) => {
-                  runId = id
-                },
-                finalize: async (result: WorkflowResult) => {
-                  const shaped = shapeScriptResult(result.value)
-                  const workspaceDir = resolveWorkspaceDir(config.workspaceDir, parentCwd)
-                  const paths = await persistArtifacts(workspaceDir, sessionId, runId || 'unknown-run', shaped)
-                  await pruneRuns(workspaceDir, sessionId, cfg.keepRuns)
-                  return `status=${shaped.verification.status} rounds=${shaped.rounds} completed=${shaped.completed}/failed=${shaped.failed} report=${paths.reportPath}`
-                },
-                start: (signal) =>
-                  ctx.workflowEngine.start({
-                    script: RESEARCH_SCRIPT,
-                    meta,
-                    args: engineArgs,
-                    ...(cfg.subagentProvider !== undefined ? { subagentProvider: cfg.subagentProvider } : {}),
-                    ...(cfg.maxTotalAgents !== undefined ? { maxTotalAgents: cfg.maxTotalAgents } : {}),
-                    parent,
-                    signal,
-                  }),
-              }),
-            )
-          } catch (error) {
-            // jobs-local 未加载 / controller 未挂 / preflight 拒绝：显式报错，由模型决定降级前台重试
-            throw new Error(
-              `dsh-deep-research: background start failed (${error instanceof Error ? error.message : String(error)})` +
-                ' — retry with background:false to run in foreground, or ensure @deepseek-ai/dsh-jobs-local is loaded',
-            )
-          }
-          const payload: { ok: boolean; status: RunStatus; jobId?: string; runId?: string } = {
-            ok: true,
-            status: 'background',
-          }
-          if (jobId.length > 0) payload.jobId = jobId
-          if (runId.length > 0) payload.runId = runId
-          return payload
-        }
-
-        // ---------- 前台路径 ----------
-        const run = ctx.workflowEngine.start({
-          script: RESEARCH_SCRIPT,
-          meta,
-          args: engineArgs,
-          ...(cfg.subagentProvider !== undefined ? { subagentProvider: cfg.subagentProvider } : {}),
-          ...(cfg.maxTotalAgents !== undefined ? { maxTotalAgents: cfg.maxTotalAgents } : {}),
+        // 共享执行内核：引擎解析、engineArgs 组装、后台/前台执行、产物落盘全部在
+        // runResearch —— 与 /deep-research 命令面同一条路径（单一事实来源）。
+        return runResearch(
+          ctx,
+          config,
+          resolved,
           parent,
-          signal: exec.signal,
-        })
-
-        let result: WorkflowResult
-        try {
-          result = await run.result
-        } finally {
-          await run.dispose()
-        }
-
-        // R1 取消态映射：引擎无独立 cancelled 负载语义——stopReason 'cancelled' 即取消（killed 语义），
-        // 前台按规格降级为结构化负载而非抛错（评审 F1）；'error' 是真故障，抛错携带引擎信息供重试。
-        if (result.stopReason === 'cancelled') {
-          const degraded: { ok: boolean; status: RunStatus; runId: string } = {
-            ok: false,
-            status: 'degraded',
-            runId: String(run.id),
-          }
-          return degraded
-        }
-        if (result.stopReason !== 'completed') {
-          throw new Error(
-            `deep_research: workflow run ${result.stopReason}${result.error !== undefined ? ` (${result.error})` : ''}`,
-          )
-        }
-
-        const shaped = shapeScriptResult(result.value)
-
-        // T4：产物落盘（尽力而为；失败则负载退化为无指针形态，不炸工具）
-        let reportPath: string | undefined
-        let artifactsDir: string | undefined
-        try {
-          const workspaceDir = resolveWorkspaceDir(config.workspaceDir, parentCwd)
-          const paths = await persistArtifacts(workspaceDir, sessionId, String(run.id), shaped)
-          reportPath = paths.reportPath
-          artifactsDir = paths.dir
-          await pruneRuns(workspaceDir, sessionId, cfg.keepRuns)
-        } catch {
-          // 落盘失败是有意静默：前台没有进度缓冲可写，注入 logger 会扩大服务接缝依赖。
-          // 唯一信号即负载缺指针；交付证据仍在紧凑负载中，不受影响。
-        }
-
-        return {
-          ok: true,
-          status: 'completed' as RunStatus,
-          ...(reportPath !== undefined ? { reportPath } : {}),
-          ...(artifactsDir !== undefined ? { artifactsDir } : {}),
-          rounds: shaped.rounds,
-          subquestions: shaped.subquestions,
-          completed: shaped.completed,
-          failed: shaped.failed,
-          verification: {
-            status: shaped.verification.status,
-            claims: shaped.verification.claims,
-            issues: shaped.verification.issues,
+          {
+            topic,
+            ...(purpose !== undefined ? { purpose } : {}),
+            questions,
+            depth,
+            synthesize,
+            verify,
+            review,
+            background,
+            language,
           },
-        }
+          exec.signal,
+        )
       },
     }),
   )
+
+  // ---------- 用户面：/deep-research 命令（宿主直执行，不进模型） ----------
+  // 与工具同内核（runResearch）。挂 ctx.effect：热重载/卸载随 fiber 注销（SPEC 铁律 3）。
+  ctx.effect(() => {
+    const dispose = ctx.commands.register({
+      name: 'deep-research',
+      description: '深度调研：直接发起一次调研，无需对话（默认后台运行，完成时通知归属会话）',
+      input: {
+        hint: '<主题> [--depth 1-3] [--purpose "…"] [--no-verify] [--no-synthesize] [--review] [--foreground]',
+      },
+      handler: (invocation) => executeResearchCommand(ctx, config, resolved, invocation),
+    })
+    return () => { dispose() }
+  }, 'dsh-deep-research: /deep-research command')
 }
