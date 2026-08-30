@@ -67,10 +67,8 @@ echo "=== Compiling src → lib (tsc -b, project references) ==="
 # 产物兼容垫片：本包 main 为 lib/types/index.js，而注入器/看门狗的预检与重载按
 # lib/index.js 定位入口（实测：缺此文件时 watch 预检永远失败、dev_reload_package
 # 磁盘降级找不到入口）。垫片仅重导出真实入口（ESM 同名模块去重，不产生双实例）。
-if [ ! -f lib/index.js ]; then
-  printf '%s
+printf '%s
 ' "export * from './types/index.js'" > lib/index.js
-  echo "=== Shim written: lib/index.js → lib/types/index.js ==="
-fi
+echo "=== Shim written: lib/index.js → lib/types/index.js ==="
 
 echo "=== Build complete ==="

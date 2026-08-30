@@ -1,7 +1,7 @@
 lockfileVersion: '9.0'
 
 settings:
-  autoInstallPeers: true
+  autoInstallPeers: false
   excludeLinksFromLockfile: false
 
 importers:
@@ -11,6 +11,12 @@ importers:
       '@deepseek-ai/dsh-agent':
         specifier: link:../../deepseek-harness/packages/core/agent
         version: link:../../deepseek-harness/packages/core/agent
+      '@deepseek-ai/dsh-agent-presets':
+        specifier: link:../../deepseek-harness/packages/preset/agent-presets
+        version: link:../../deepseek-harness/packages/preset/agent-presets
+      '@deepseek-ai/dsh-commands':
+        specifier: link:../../deepseek-harness/packages/interaction/commands
+        version: link:../../deepseek-harness/packages/interaction/commands
       '@deepseek-ai/dsh-jobs':
         specifier: link:../../deepseek-harness/packages/jobs/jobs
         version: link:../../deepseek-harness/packages/jobs/jobs

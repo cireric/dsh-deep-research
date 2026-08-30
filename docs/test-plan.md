@@ -50,7 +50,7 @@ sanitize 后路径 = `<base>/<安全 sessionId>/<安全 runId>`；七类文件�
 ## 3. 运行方式
 
 ```bash
-npm test                        # node --test tests/
+npm test                        # node --test "tests/**/*.mjs"
 node tests/regression.test.mjs  # 进程内等价（受限沙箱无 spawn 权限时）
 npm run smoke
 npm run build                   # bash scripts/build.sh（链接 harness 依赖 + tsc -b 类型门禁 + lib/index.js 垫片；先于此计划任何改动）

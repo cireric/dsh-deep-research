@@ -1,3 +1,4 @@
 # peerDependencies are runtime contracts resolved by the DSH host profile,
 # not install-time deps. Never auto-fetch them from the registry.
-# pnpm v11 project settings live in pnpm-workspace.yaml (autoInstallPeers: false).
+# pnpm v11 reads project-level settings from this file (.npmrc key is ignored).
+autoInstallPeers: false

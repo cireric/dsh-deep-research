@@ -30,13 +30,13 @@
 ### 输出负载（schema additionalProperties:false）
 
 ```
-{ ok, status: 'completed' | 'background' | 'degraded',
-  runId?, jobId?, reportPath?, artifactsDir?,
+{ ok, status: 'completed' | 'background' | 'degraded',   // status 词表由 schema enum 收口（R1）
+  runId?, jobId?, reportPath?, artifactsDir?, warning?,
   rounds, subquestions, completed, failed,
   verification: { status, claims: { verified, unverified, refuted }, issues: string[] } }
 ```
 
-- **前台**：status='completed'；`reportPath/artifactsDir` 在落盘成功时出现（失败则省略——schema 不允许额外告警字段，产物缺失如实反映为无指针）。引擎 stopReason='cancelled' → 结构化降级负载 `{ok:false, status:'degraded', runId}`（R1，评审 F1），不再抛错；'error' → 抛工具错误并携带引擎信息。`verification.issues[]` 随负载返回——failed/unavailable 时主代理就地可读必修点，无需先读落盘文件（评审 F2）。
+- **前台**：status='completed'；`reportPath/artifactsDir` 在落盘成功时出现；落盘失败时省略指针并附 `warning`（如 `artifacts persistence failed: …`）说明原因——诚实降级，不吞错。引擎 stopReason='cancelled' → 结构化降级负载 `{ok:false, status:'degraded', runId}`（R1，评审 F1），不再抛错；'error' → 抛工具错误并携带引擎信息。`verification.issues[]` 随负载返回——failed/unavailable 时主代理就地可读必修点，无需先读落盘文件（评审 F2）。
 - **后台**：立即返回 status='background' + jobId/runId；完成通知由 jobs controller 投递，detail 为 finalize 摘要行 `status=… rounds=… completed=…/failed=… report=<路径>`。
 
 ### Config 键

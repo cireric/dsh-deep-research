@@ -54,7 +54,7 @@ dsh-deep-research/node_modules/
 
 ```bash
 npm run build     # bash scripts/build.sh（链接 harness 依赖 → tsc -b 类型检查 → lib/index.js 垫片）
-npm test          # node --test tests/*.mjs（回归 + 命令面解析器全套）
+npm test          # node --test "tests/**/*.mjs"（回归 + 命令面解析器全套；glob 必须引号包裹）
 npm run smoke     # scripts/smoke.mjs 快速冒烟
 ```
 

@@ -72,3 +72,14 @@ test('double dash inside a word is not a flag', () => {
   if (!r.ok) return
   assert.equal(r.request.topic, 'C++--template 专题')
 })
+
+test('escaped quote in --purpose is a documented limitation (grammar has no escaping)', () => {
+  // 语法不支持转义引号：--purpose "a\\"b" 在第一个内嵌引号处截断，反斜杠随捕获
+  // 进入 purpose、引号后残片并入主题。本测试钉住现状；改进需引入真引号语法。
+  const r = parseResearchCommand('主题 --purpose "a\\"b"')
+  assert.equal(r.ok, true)
+  if (!r.ok) return
+  assert.equal(r.request.purpose, 'a\\')
+  assert.equal(r.request.topic, '主题 b"')
+  assert.equal(r.request.depth, 2)
+})

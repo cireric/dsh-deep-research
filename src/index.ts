@@ -238,6 +238,7 @@ type ResearchPayload =
     status: 'completed'
     reportPath?: string
     artifactsDir?: string
+    warning?: string
     rounds: number
     subquestions: number
     completed: number
@@ -263,18 +264,25 @@ type ResearchPayload =
  * 全部用宽松 get()/try-catch：未声明 inject 时访问器自身会抛错、桩 ctx 无 reflect 等
  * 一律按缺失处理，最终由调用面给出明确错误。
  */
-function resolveWorkflowEngine(ctx: Context, parent: Agent): WorkflowEngine | undefined {
+function resolveWorkflowEngine(ctx: Context, parent: Agent): { engine: WorkflowEngine | undefined; probeError: unknown } {
+  let probeError: unknown
   try {
     const fromMount = serviceForAgent(ctx, parent, 'workflowEngine')
-    if (fromMount !== undefined) return fromMount
-  } catch { /* 非 preset 部署 / 无 scope / 桩 ctx 无 reflect：按缺失处理 */ }
+    if (fromMount !== undefined) return { engine: fromMount, probeError }
+  } catch (error) {
+    probeError = error /* 非 preset 部署 / 无 scope / 桩 ctx 无 reflect：按缺失处理，但保留探查原因 */
+  }
   try {
     const fromAgent = parent.ctx.get('workflowEngine') as WorkflowEngine | undefined
-    if (fromAgent !== undefined) return fromAgent
-  } catch { /* 未挂载/未声明时按缺失处理 */ }
+    if (fromAgent !== undefined) return { engine: fromAgent, probeError }
+  } catch (error) {
+    probeError = error /* 未挂载/未声明时按缺失处理，但保留探查原因 */
+  }
   try {
-    return ctx.get('workflowEngine') as WorkflowEngine | undefined
-  } catch { return undefined }
+    return { engine: ctx.get('workflowEngine') as WorkflowEngine | undefined, probeError }
+  } catch (error) {
+    return { engine: undefined, probeError: error }
+  }
 }
 
 /**
@@ -296,17 +304,26 @@ async function runResearch(
   parent: Agent,
   req: ResearchRequest,
   externalSignal: AbortSignal,
+  preResolvedEngine?: WorkflowEngine,
 ): Promise<ResearchPayload> {
   // workflowEngine 调用期解析（三条链见 resolveWorkflowEngine）：优先官方
   // serviceForAgent READ 寻址（isolate 组实例对 agent 根 ctx 不可见，PR #5 场景靠它），
-  // 次级回退 agent 作用域 / host 平面。前台/后台两支路共用本实例。
-  const engine = resolveWorkflowEngine(ctx, parent)
+  // 次级回退 agent 作用域 / host 平面。前台/后台两支路共用本实例；命令面预先解析
+  // 成功时直接传入，避免同一调用二次遍历解析链。
+  let engine = preResolvedEngine
+  let probeError: unknown
+  if (engine === undefined) {
+    const probe = resolveWorkflowEngine(ctx, parent)
+    engine = probe.engine
+    probeError = probe.probeError
+  }
   if (!engine) {
+    const cause = probeError instanceof Error ? ` 探查原因：${probeError.message}` : ''
     throw new Error(
       'deep_research: workflowEngine unavailable in the calling agent scope — '
         + 'make sure the preset mounts a delegation group with `isolate: workflowEngine: true` '
         + '(router-standard / standard / code), or register the engine on the agent scope '
-        + 'or host plane (resolution order: serviceForAgent -> agent.ctx -> host ctx)',
+        + 'or host plane (resolution order: serviceForAgent -> agent.ctx -> host ctx)' + cause,
     )
   }
 
@@ -367,7 +384,7 @@ async function runResearch(
       // jobs-local 未加载 / controller 未挂 / preflight 拒绝：显式报错，由调用面决定降级前台重试
       throw new Error(
         `dsh-deep-research: background start failed (${error instanceof Error ? error.message : String(error)})` +
-          ' — retry with foreground mode, or ensure @deepseek-ai/dsh-jobs-local is loaded',
+          ' — set background:false (foreground mode), or ensure @deepseek-ai/dsh-jobs-local is loaded',
       )
     }
     const payload: Extract<ResearchPayload, { status: 'background' }> = { ok: true, status: 'background' }
@@ -407,18 +424,20 @@ async function runResearch(
 
   const shaped = shapeScriptResult(result.value)
 
-  // T4：产物落盘（尽力而为；失败则负载退化为无指针形态，不炸工具）
+  // T4：产物落盘（尽力而为；失败则负载退化为无指针形态并附 warning，不炸工具）
   let reportPath: string | undefined
   let artifactsDir: string | undefined
+  let persistWarning: string | undefined
   try {
     const workspaceDir = resolveWorkspaceDir(config.workspaceDir, parentCwd)
     const paths = await persistArtifacts(workspaceDir, sessionId, String(run.id), shaped)
     reportPath = paths.reportPath
     artifactsDir = paths.dir
     await pruneRuns(workspaceDir, sessionId, resolved.keepRuns)
-  } catch {
-    // 落盘失败是有意静默：前台没有进度缓冲可写，注入 logger 会扩大服务接缝依赖。
-    // 唯一信号即负载缺指针；交付证据仍在紧凑负载中，不受影响。
+  } catch (error) {
+    // 落盘失败不炸工具：负载降级为无指针形态，并在 warning 中如实说明原因
+    // （诚实降级——累计证据仍在紧凑负载中，不受影响）。
+    persistWarning = error instanceof Error ? error.message : String(error)
   }
 
   return {
@@ -426,6 +445,7 @@ async function runResearch(
     status: 'completed',
     ...(reportPath !== undefined ? { reportPath } : {}),
     ...(artifactsDir !== undefined ? { artifactsDir } : {}),
+    ...(persistWarning !== undefined ? { warning: `artifacts persistence failed: ${persistWarning}` } : {}),
     rounds: shaped.rounds,
     subquestions: shaped.subquestions,
     completed: shaped.completed,
@@ -456,7 +476,7 @@ async function executeResearchCommand(
   const parent: Agent = invocation.agent
   // 与 runResearch 同型：调用期经 resolveWorkflowEngine 三链解析（官方 READ
   // 寻址优先——isolate 组实例对 agent 根 ctx 不可见）。失败回报明确错误。
-  const engine = resolveWorkflowEngine(ctx, parent)
+  const { engine } = resolveWorkflowEngine(ctx, parent)
   if (!engine) {
     return {
       kind: 'error',
@@ -481,9 +501,10 @@ async function executeResearchCommand(
         verify: parsed.request.verify,
         review: parsed.request.review,
         background: !parsed.request.foreground,
-        language: 'zh',
+        language: 'zh', // 命令面固定中文（无 --language 参数；工具面可传 language）
       },
       invocation.signal,
+      engine,
     )
     if (payload.status === 'background') {
       return { kind: 'success', text: `深度调研已转后台（jobId=${payload.jobId ?? '?'}），完成时将收到通知。` }
@@ -532,11 +553,14 @@ export function apply(ctx: Context, config: Config = {}) {
           additionalProperties: false,
           properties: {
             ok: { type: 'boolean', required: true },
-            status: { type: 'string', required: true },
+            // R1 词表收口：completed | background | degraded（不引入 'cancelled'；
+            // verification.status 不加 enum——宿主 shapeScriptResult 有 'unknown' 兜底）
+            status: { type: 'string', required: true, enum: ['completed', 'background', 'degraded'] },
             runId: { type: 'string' },
             jobId: { type: 'string' },
             reportPath: { type: 'string' },
             artifactsDir: { type: 'string' },
+            warning: { type: 'string' },
             rounds: { type: 'integer' },
             subquestions: { type: 'integer' },
             completed: { type: 'integer' },
@@ -581,8 +605,6 @@ export function apply(ctx: Context, config: Config = {}) {
       async execute(args, exec) {
         const parent = exec.agent
         if (!parent) throw new Error('deep_research requires a calling agent (exec.agent was undefined)')
-        const cfg = resolved
-
         // ---------- 参数校验（T2 契约保持不变） ----------
         // 平台已按 required:true 在 execute 前拦截缺失 topic；此处仍做运行时形状防御，
         // 且不用 String(args.topic)——它会把 undefined 折叠成字符串 "undefined" 骗过空串检查。
@@ -595,7 +617,7 @@ export function apply(ctx: Context, config: Config = {}) {
         const verify = args.verify !== false
         const review = args.review === true
         const background =
-          args.background === true ? true : args.background === false ? false : cfg.backgroundMode === 'background'
+          args.background === true ? true : args.background === false ? false : resolved.backgroundMode === 'background'
         const language = typeof args.language === 'string' && args.language.trim().length > 0 ? args.language.trim() : 'zh'
         const questions = parseQuestionList(args.questions)
 
