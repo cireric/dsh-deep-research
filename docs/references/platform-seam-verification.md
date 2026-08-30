@@ -11,9 +11,9 @@ Verdict legend: **HOLDS** (claim correct), **NEEDS-REVISION** (claim wrong/outda
 
 ---
 
-## 1. Service names & injection: `['tools', 'workflowEngine', 'jobs']`
+## 1. Service names & plugin seam: tools / jobs / workflowEngine（workflowEngine 为调用期能力）
 
-**Verdict: HOLDS**
+**Verdict: HOLDS（服务名）；inject 清单已被调用期解析设计取代（2026-08-30 修订）**
 
 - (a) `ctx.workflowEngine` is the real service name — NOT `ctx.workflows`.
   - `packages/workflow/workflow/src/index.ts:31-34` — `interface Context { workflowEngine: WorkflowEngine }`.
@@ -26,8 +26,14 @@ Verdict legend: **HOLDS** (claim correct), **NEEDS-REVISION** (claim wrong/outda
   - `packages/web/tool-web/src/index.ts:24` — `export const inject = ['tools', 'web', 'systemPrompt']`.
 
 Note: the spec itself already corrects the upstream `ctx.workflows` mistake
-(spec line 18, 75, 265). The plugin's `inject: ['tools', 'workflowEngine', 'jobs']`
-is valid.
+(spec line 18, 75, 265). The service names above hold, but the plugin's
+loading seam was REVISED (2026-08-30): `inject` excludes `workflowEngine`
+because official presets isolate it inside the session delegation group
+(entry-local realm invisible to the agent root context and the host), so a
+host-level injection would stay pending forever. The engine is now resolved
+at call time through `resolveWorkflowEngine` (serviceForAgent read addressing
+first — see docs/engine-resolution.md), itself backed by this harness's
+`serviceForAgent` export (packages/preset/agent-presets/src/mount.ts).
 
 ---
 

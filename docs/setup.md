@@ -3,7 +3,7 @@
 ## 1. 前置条件
 
 - DSH 运行中的 harness，其组合已加载：
-  - `@deepseek-ai/dsh-workflow` 的实现服务（workflowEngine + 子代理 provider，默认 `spawn`）；
+  - `@deepseek-ai/dsh-workflow` 的实现服务（workflowEngine + 子代理 provider，默认 `spawn`）；Web 组合中引擎被 preset isolate 在会话 delegation 组内（standard/code/router-standard），插件在**调用期**经 `resolveWorkflowEngine` 三链解析（① 官方 `serviceForAgent` READ 寻址 → ② agent 作用域 → ③ host 平面；详见 `docs/engine-resolution.md`）；未挂引擎的 preset 下调用会得到明确报错；
   - **后台模式需要**：`@deepseek-ai/dsh-jobs-local`（jobs 实现）及其 controller。未加载时后台启动会显式报错——按错误提示改用 `background:false` 或先装 jobs-local。
 - Node ^22.19 || ≥24。
 
@@ -25,7 +25,7 @@ dsh plugin --profile web add link:/abs/path/to/dsh-deep-research # 方式三：�
       name: 'dsh-deep-research'
 ```
 
-peer 依赖需在加载方可解析：`cordis`、`@deepseek-ai/dsh-tools`、`@deepseek-ai/dsh-workflow`、`@deepseek-ai/dsh-jobs`、`@deepseek-ai/dsh-agent`。在本仓库外安装时由宿主 node_modules/workspace 链接提供；仓库内开发见 §4。
+peer 依赖需在加载方可解析：`cordis`、`@deepseek-ai/dsh-tools`、`@deepseek-ai/dsh-workflow`、`@deepseek-ai/dsh-jobs`、`@deepseek-ai/dsh-agent`、`@deepseek-ai/dsh-agent-presets`（调用期 READ 寻址引擎）、`@deepseek-ai/dsh-commands`（/deep-research 命令面）。在本仓库外安装时由宿主 node_modules/workspace 链接提供；仓库内开发见 §4。
 
 卸载与更新：`dsh plugin --profile web remove|update dsh-deep-research`（同样转发 pnpm 并自动维护 bundles 列表）。
 
@@ -43,6 +43,8 @@ dsh-deep-research/node_modules/
 ├── @types/node                  → deepseek-harness/node_modules/@types/node
 └── @deepseek-ai/
     ├── dsh-agent                → packages/core/agent
+    ├── dsh-agent-presets        → packages/preset/agent-presets
+    ├── dsh-commands             → packages/interaction/commands
     ├── dsh-jobs                 → packages/jobs/jobs
     ├── dsh-tools                → packages/core/tools
     └── dsh-workflow             → packages/workflow/workflow
@@ -51,8 +53,8 @@ dsh-deep-research/node_modules/
 常用命令：
 
 ```bash
-npm run build     # tsc -b（含类型检查；引用 harness 预构建工程）
-npm test          # node --test tests/ （23 用例）
+npm run build     # bash scripts/build.sh（链接 harness 依赖 → tsc -b 类型检查 → lib/index.js 垫片）
+npm test          # node --test tests/*.mjs（回归 + 命令面解析器全套）
 npm run smoke     # scripts/smoke.mjs 快速冒烟
 ```
 

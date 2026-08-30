@@ -8,9 +8,9 @@
 2. **宿主桥单测**：jobs 桥（fake registry/engine/ctx）与落盘模块（临时目录真实 fs）直接实例化验证。
 3. **快速冒烟**：`scripts/smoke.mjs` 单场景端到端（规划→两轮研究→综合→修复环→审查），用于改脚本后的秒级反馈。
 
-未覆盖（诚实声明）：真实 LLM/真实 web 工具的端到端质量、长上下文综合的实测体积（spec 开放项③④）、`dsh plugin add` 的加载验收、宿主 `execute()` 前台降级分支与 schema 扩展（评审 F1/F2/F3 —— vm 镜像只覆盖 SCRIPT 与 jobs 桥层，宿主路径靠 tsc 门禁 + 活环境首跑）——见 §5。
+未覆盖（诚实声明）：真实 LLM/真实 web 工具的端到端质量、长上下文综合的实测体积（原规格开放项③④）、`dsh plugin add` 的加载验收、宿主 `execute()` 前台降级分支与 schema 扩展（评审 F1/F2/F3 —— vm 镜像只覆盖 SCRIPT 与 jobs 桥层，宿主路径靠 tsc 门禁 + 活环境首跑）——见 §5。（2026-08-30 已做首次活环境 E2E：调用期引擎解析（serviceForAgent 三链）修复后真实调用跑通流水线直至工具墙超时。）
 
-## 2. 用例清单（23，全绿）
+## 2. 用例清单（全绿；`tests/regression.test.mjs` + `tests/command.spec.mjs` 合计，以 `npm test` 实测数为准）
 
 ### 流水线场景（T6 规格 + 评审后优化 ⑦）
 
@@ -53,7 +53,7 @@ sanitize 后路径 = `<base>/<安全 sessionId>/<安全 runId>`；七类文件�
 npm test                        # node --test tests/
 node tests/regression.test.mjs  # 进程内等价（受限沙箱无 spawn 权限时）
 npm run smoke
-npm run build                   # tsc -b 类型门禁（先于此计划任何改动）
+npm run build                   # bash scripts/build.sh（链接 harness 依赖 + tsc -b 类型门禁 + lib/index.js 垫片；先于此计划任何改动）
 ```
 
 ## 4. 变更守则
@@ -65,6 +65,7 @@ npm run build                   # tsc -b 类型门禁（先于此计划任何改
 
 ## 5. 待活环境验收（后续）
 
-- `dsh plugin add` 加载后工具注册、inject 三服务齐备；
+- `dsh plugin add` 加载后工具注册、inject 服务齐备（`['tools', 'jobs', 'commands']`；workflowEngine 为调用期能力，不参与加载期 inject）；
+- ✅ 已验收（2026-08-30 活环境首跑）：调用期引擎解析（serviceForAgent 三链）真实命中会话 delegation 组引擎，流水线真实执行；
 - 真实后台链路：jobId 通知到达会话、detail 摘要可读；
 - 子代理默认工具世界是否含 `web_fetch`（决定 verifier 走强/弱核实分支，行为两侧均已实现并有提示词约束）。
