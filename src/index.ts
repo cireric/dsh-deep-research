@@ -25,6 +25,7 @@
  * @module dsh-deep-research (github.com/cireric/dsh-deep-research)
  */
 
+import { randomUUID } from 'node:crypto'
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import { serviceForAgent } from '@deepseek-ai/dsh-agent-presets'
 import type { Context } from 'cordis'
@@ -32,11 +33,15 @@ import type { Agent } from '@deepseek-ai/dsh-agent'
 import type { CommandInvocation, CommandResult } from '@deepseek-ai/dsh-commands'
 import type { WorkflowEngine, WorkflowMeta, WorkflowResult } from '@deepseek-ai/dsh-workflow'
 import { RESEARCH_SCRIPT } from './script.ts'
-import { parseResearchCommand } from './command.ts'
+import { buildResearchIntentMessage, CLARIFY_STRATEGIES, DEFAULT_CLARIFY_STRATEGY, parseResearchCommand, type ClarifyStrategy } from './command.ts'
 import { persistArtifacts, pruneRuns, resolveWorkspaceDir } from './artifacts.ts'
 import type { ScriptResultShape, VerificationStatus } from './artifacts.ts'
 import { startBackgroundRun } from './background.ts'
 import { parseQuestionList } from './questions.ts'
+
+/** Agent.followup 的消息类型——从 followup 签名派生，避免为一条注入引入
+ * @deepseek-ai/dsh-session / dsh-llm 依赖（沿用 appendStartedNote 的约束，ADR-0003）。 */
+type FollowupUserMessage = Parameters<Agent['followup']>[0]
 
 // v2 后台模式需要 JobKindMap 声明合并：jobId 前缀即 kind 名 → `deep-research-N`。
 declare module '@deepseek-ai/dsh-jobs' {
@@ -64,6 +69,9 @@ const DEFAULTS = {
   maxItemsPerCall: 4096,
   keepRuns: 20,
   backgroundMode: 'background',
+  /** 入口澄清策略：minimal=仅分叉才问（默认）｜auto=v1 行为｜never=禁止访谈（假设进 purpose）。
+   * 默认值常量见 command.ts 的 DEFAULT_CLARIFY_STRATEGY（单一事实来源）。 */
+  clarifyStrategy: DEFAULT_CLARIFY_STRATEGY,
 } as const
 
 /** 插件配置（全部可选，缺省继承父路由 / 规格默认值）。 */
@@ -90,6 +98,8 @@ export interface Config {
   backgroundMode?: 'background' | 'foreground'
   /** 保留最近 N 个 run 目录（≥1；不提供则用默认值 20）。 */
   keepRuns?: number
+  /** 入口澄清策略：auto（v1 行为）/ minimal（默认，仅分叉才问）/ never（禁止访谈）。 */
+  clarifyStrategy?: ClarifyStrategy
   /** 预留开关：raw 抓取片段落盘增强（v2.0 未启用，见 spec 开放项② / ADR-0002 D7）。 */
   rawNotes?: boolean
 }
@@ -105,6 +115,7 @@ interface ResolvedConfig {
   maxItemsPerCall: number
   keepRuns: number
   backgroundMode: 'background' | 'foreground'
+  clarifyStrategy: ClarifyStrategy
 }
 
 function positiveInt(value: unknown, label: string): number | undefined {
@@ -123,6 +134,17 @@ function nonNegativeInt(value: unknown, label: string): number | undefined {
     throw new Error(`dsh-deep-research: ${label} must be a non-negative integer`)
   }
   return n
+}
+
+/** 入口澄清策略白名单校验（评审 F3 同构：白名单之外显式报错，不静默回退）。 */
+function parseClarifyStrategy(value: unknown): ClarifyStrategy {
+  const strategy = value === undefined ? DEFAULTS.clarifyStrategy : value
+  if (typeof strategy !== 'string' || !CLARIFY_STRATEGIES.includes(strategy as ClarifyStrategy)) {
+    throw new Error(
+      `dsh-deep-research: clarifyStrategy must be one of ${CLARIFY_STRATEGIES.join(' | ')} (received "${String(strategy)}")`,
+    )
+  }
+  return strategy as ClarifyStrategy
 }
 
 /** 显式的配置解析步骤：校验 + 默认值一次成型（评审 F6：不再散落 fallback 常量）。 */
@@ -144,6 +166,7 @@ function resolveConfig(config: Config): ResolvedConfig {
     maxItemsPerCall: positiveInt(config.maxItemsPerCall, 'maxItemsPerCall') ?? DEFAULTS.maxItemsPerCall,
     keepRuns: positiveInt(config.keepRuns, 'keepRuns') ?? DEFAULTS.keepRuns,
     backgroundMode: config.backgroundMode ?? DEFAULTS.backgroundMode,
+    clarifyStrategy: parseClarifyStrategy(config.clarifyStrategy),
   }
 }
 
@@ -229,7 +252,7 @@ interface ResearchRequest {
   language: string
 }
 
-/** The payload runResearch settles with — the tool returns it verbatim; the command maps it to text. */
+/** The payload runResearch settles with — the tool face returns it verbatim; the command face no longer consumes it (ADR-0003: intent entry). */
 type ResearchPayload =
   | { ok: true; status: 'background'; jobId?: string; runId?: string }
   | { ok: false; status: 'degraded'; runId: string }
@@ -459,68 +482,40 @@ async function runResearch(
 }
 
 /**
- * The /deep-research command face: parse the command line, run the shared
- * core against the receiving agent, and settle with human-readable text.
- * The receiving agent's scoped workflowEngine is resolved exactly as the
- * tool face does; a thrown handler settles as a registry-level error, so
- * expected failures map to explicit CommandResult errors here.
+ * The /deep-research command face (ADR-0003): an intent entry, not an executor.
+ * It parses the command line into advisory hints and injects the research
+ * intent as a user-source message via `agent.followup` — which opens a real
+ * turn, so a fresh command-only session un-blanks and becomes visible — then
+ * returns immediately. The main agent clarifies if needed and calls the
+ * `deep_research` tool (background by default).
  */
-async function executeResearchCommand(
-  ctx: Context,
-  config: Config,
-  resolved: ResolvedConfig,
+function executeResearchCommand(
   invocation: CommandInvocation,
-): Promise<CommandResult> {
+  clarifyStrategy: ClarifyStrategy,
+): CommandResult {
   const parsed = parseResearchCommand(invocation.rawInput)
   if (!parsed.ok) return { kind: 'error', text: parsed.error }
-  const parent: Agent = invocation.agent
-  // 与 runResearch 同型：调用期经 resolveWorkflowEngine 三链解析（官方 READ
-  // 寻址优先——isolate 组实例对 agent 根 ctx 不可见）。失败回报明确错误。
-  const { engine } = resolveWorkflowEngine(ctx, parent)
-  if (!engine) {
-    return {
-      kind: 'error',
-      text:
-        'workflow 引擎不可达：请在提供 `isolate: workflowEngine: true` delegation 组的 preset'
-        + '（router-standard / standard / code 及其衍生）下使用（解析链：'
-        + 'serviceForAgent → agent 作用域 → host 平面）。',
-    }
-  }
-  try {
-    const payload = await runResearch(
-      ctx,
-      config,
-      resolved,
-      parent,
-      {
-        topic: parsed.request.topic,
-        ...(parsed.request.purpose !== undefined ? { purpose: parsed.request.purpose } : {}),
-        questions: [],
-        depth: parsed.request.depth,
-        synthesize: parsed.request.synthesize,
-        verify: parsed.request.verify,
-        review: parsed.request.review,
-        background: !parsed.request.foreground,
-        language: 'zh', // 命令面固定中文（无 --language 参数；工具面可传 language）
-      },
-      invocation.signal,
-      engine,
-    )
-    if (payload.status === 'background') {
-      return { kind: 'success', text: `深度调研已转后台（jobId=${payload.jobId ?? '?'}），完成时将收到通知。` }
-    }
-    if (payload.status === 'degraded') {
-      return { kind: 'success', text: '深度调研已取消，未产出结果；如需继续请重新发起。' }
-    }
-    return {
-      kind: 'success',
-      text:
-        `深度调研完成（轮次 ${payload.rounds}，子问题 ${payload.subquestions}，完成 ${payload.completed}/失败 ${payload.failed}，验证=${payload.verification.status}）` +
-        (payload.reportPath !== undefined ? `\n报告已落盘：${payload.reportPath}` : ''),
-    }
-  } catch (error) {
-    return { kind: 'error', text: `深度调研失败：${error instanceof Error ? error.message : String(error)}` }
-  }
+
+  // 命令级 --clarify 覆盖插件配置（缺失时用 resolved 策略，默认 minimal）。
+  const policy = parsed.request.clarify ?? clarifyStrategy
+  const { purpose, depth } = parsed.request
+  const lines = [
+    buildResearchIntentMessage(parsed.request, policy),
+    ...(purpose !== undefined ? [`研究用途：${purpose}。`] : []),
+    ...(depth !== undefined ? [`研究精度：depth=${depth}。`] : []),
+  ]
+
+  // 意图入口替用户表达主题（ADR-0003：source.kind='user'）。手拼 UserMessage，
+  // 不复用 @deepseek-ai/dsh-llm 工厂：避免为一条消息引入新 peer 依赖（沿用旧
+  // appendStartedNote 的约束）——followup 开 turn 后由主 agent 承接调工具。
+  invocation.agent.followup({
+    id: randomUUID() as FollowupUserMessage['id'],
+    role: 'user',
+    content: [{ type: 'text', text: lines.join('\n') }],
+    source: { kind: 'user' },
+  })
+
+  return { kind: 'success', text: '已发起深度研究，主 agent 将开始处理。' }
 }
 
 export function apply(ctx: Context, config: Config = {}) {
@@ -534,7 +529,7 @@ export function apply(ctx: Context, config: Config = {}) {
         '当用户要求对复杂主题做深度研究/调研（需要多源信息搜集、交叉验证、撰写调研报告）时调用。' +
         '流程：规划（答案空间/维度/盲区）→ 自适应多轮并行研究 → 综合成报告 → 强制验证（有界修复环）→ 可选对抗审查。' +
         '触发场景：深度研究、调研、多源信息综合分析、研究报告、文献/资料搜集。' +
-        '若需求模糊，先向用户澄清（用途/范围）再调用；若已有具体问题清单，直接传 questions 可跳过自动拆解。' +
+        '若需求模糊，按入口澄清策略做分叉级澄清（默认 minimal，可配置 auto|minimal|never）；可推断项一律自行默认；若已有具体问题清单，直接传 questions 可跳过自动拆解。' +
         '后台模式（默认）下 execute 立即返回 jobId，研究在后台运行，完成时向归属会话投递通知并落盘报告。',
       parameters: {
         topic: { type: 'string', required: true, description: '研究主题。' },
@@ -622,7 +617,7 @@ export function apply(ctx: Context, config: Config = {}) {
         const questions = parseQuestionList(args.questions)
 
         // 共享执行内核：引擎解析、engineArgs 组装、后台/前台执行、产物落盘全部在
-        // runResearch —— 与 /deep-research 命令面同一条路径（单一事实来源）。
+        // runResearch —— 工具面唯一执行路径（ADR-0003：命令面已反转为意图入口，不再调用 runResearch）。
         return runResearch(
           ctx,
           config,
@@ -645,16 +640,17 @@ export function apply(ctx: Context, config: Config = {}) {
     }),
   )
 
-  // ---------- 用户面：/deep-research 命令（宿主直执行，不进模型） ----------
-  // 与工具同内核（runResearch）。挂 ctx.effect：热重载/卸载随 fiber 注销（SPEC 铁律 3）。
+  // ---------- 用户面：/deep-research 命令（意图入口，ADR-0003） ----------
+  // 命令只表达研究意图并 followup 开一轮真 turn；实际执行由主 agent 调工具面。
+  // 挂 ctx.effect：热重载/卸载随 fiber 注销（SPEC 铁律 3）。
   ctx.effect(() => {
     const dispose = ctx.commands.register({
       name: 'deep-research',
-      description: '深度调研：直接发起一次调研，无需对话（默认后台运行，完成时通知归属会话）',
+      description: '深度调研：发起一次研究意图，由主 agent 按 clarifyStrategy 处理澄清后调用 deep_research 工具（后台运行，完成时通知归属会话）',
       input: {
-        hint: '<主题> [--depth 1-3] [--purpose "…"] [--no-verify] [--no-synthesize] [--review] [--foreground]',
+        hint: '<主题> [--depth 1-3] [--purpose "…"] [--clarify auto|minimal|never]',
       },
-      handler: (invocation) => executeResearchCommand(ctx, config, resolved, invocation),
+      handler: (invocation) => executeResearchCommand(invocation, resolved.clarifyStrategy),
     })
     return () => { dispose() }
   }, 'dsh-deep-research: /deep-research command')

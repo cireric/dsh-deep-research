@@ -61,7 +61,8 @@
 3. 企业内部信息源接入不在本插件范围（依赖宿主工具世界的组合事实，与 spec 开放项②同源）。
 
 > 修订记录（评审后优化轮）：原偏差「LIMIT(depth) 未实现」已落实为 `agentBudget = min(searchBudget, LIMIT(depth))`（src/script.ts，回归 ⑦）；前台取消改为结构化 `degraded` 负载（D6 表同步）。
-> 追加（2026-08-30）：① 用户面 `/deep-research` 命令（与工具共用 runResearch 内核，默认后台、`--foreground` 翻转；实现见 src/command.ts + src/index.ts 命令面）；② D1 引擎解析落实为调用期 `resolveWorkflowEngine` 三链（serviceForAgent 官方 READ 寻址优先——isolate 组实例对 agent 根 ctx 与 host 均不可见，加载期 inject 会导致 root 永久 pending；求证过程与机制见 docs/engine-resolution.md）。
+> 追加（2026-08-30）：① 用户面 `/deep-research` 命令（与工具共用 runResearch 内核，默认后台、`--foreground` 翻转；实现见 src/command.ts + src/index.ts 命令面）；② D1 引擎解析落实为调用期 `resolveWorkflowEngine` 三链
+> 追加（2026-08-30，同日反转入 ADR-0003）：命令面「宿主直执行、默认后台、`--foreground` 翻转」已废止——`/deep-research` 反转为「模型中介意图入口」（followup 开 turn，主 agent 调度 `deep_research` 工具），见 ADR-0003。（serviceForAgent 官方 READ 寻址优先——isolate 组实例对 agent 根 ctx 与 host 均不可见，加载期 inject 会导致 root 永久 pending；求证过程与机制见 docs/engine-resolution.md）。
 > 追加（2026-09 spec 退役）：docs/spec 目录（v2 规格、两轮审核报告）已删除——决策职能迁归：架构决策=本文件+ADR-0001，接口契约=docs/interfaces.md，测试策略=docs/test-plan.md，提示词设计=docs/agent-prompts.md，产物语义=docs/artifacts.md；既往审核结论（A1-A3/B1/B3/C3/C5、R1-R7）均已落实于上述文档，D8 补记非目标。
 > 追加（2026-09 参考精简）：docs/references/ 中 methodology-comparison.md（设计对比研究记录，结论已固化于本文件与 agent-prompts.md）与 implementation-tickets.md（完成台账，事故教训已入 test-plan.md §4）一并退役；保留 platform-seam-verification.md（ADR-0001 复核清单）、community-comparison.md（B1-B4 候选清单）、anthropic/ 一手材料、upstream-v1/（v1 快照+许可）。
 

@@ -57,3 +57,15 @@ synthesize=false 分支专用：对 evidence_state 中每条 confirmed 声明按
 ## 复现方式
 
 所有提示词可在回归测试中逐字断言：`tests/regression.test.mjs` 的 vm 镜像把每个 `agent(prompt, opts)` 调用原样递给脚本代理工厂，`opts.label` 即上文各节名称（`planner / research:qN[-fM] / recon:bN / synthesizer[-revN] / verifier[-rN | -evidence] / reviewer`）。
+
+## 9. 澄清策略（clarifyStrategy）设计依据
+
+权威实现：`src/command.ts` 的 `buildResearchIntentMessage`（三态消息模板）＋ `src/index.ts` 的 `executeResearchCommand`（消息拼装）与 `parseClarifyStrategy`（配置白名单校验）。不属于提示词层，因此不写入 `src/script.ts`——入口消息约束的是"主 agent 是否/如何澄清"，各研究子代理提示词不涉及澄清。
+
+三种策略与成本函数依据：
+
+- `auto`（v1 兼容）：无条件"不明确就澄清 1–2 问"——成本高、易把可推断项转嫁给用户。
+- `minimal`（默认）：**只在"缺失信息分叉答案空间"时问**——存在 ≥2 个合理且会显著改变研究范围的解释（对比基线、成功标准、决策主体约束）才允许 1 轮 1 个单选（带"跳过，用默认"、选项不锚定）；语言/产出形式/场景权重/深度等可推断项一律默认；已给 questions 时禁止再澄清。依据：访谈成本（一次打断，≈可忽略）vs 假设穷举成本（每个未收敛分叉 × 每分支检索预算，可达数百万 token）——分叉时 10 秒收敛 ≪ 穷举代价，可推断项反之。
+- `never`：禁止访谈，缺失的决策信息降级为 `purpose` 研究假设，由 planner（见 §1 第 5 条要求）显式标注受假设约束的维度。
+
+设计初衷（本会话实证）：v1 `auto` 默认导致主 agent 一次访谈 4 问、其中 3 问是可推断项（产出形式、场景权重、二次追问），仅对比基线 1 问有信息增量；本轮把"澄清"从无条件默认改为成本函数裁决，并允许命令级 `--clarify` 覆盖。

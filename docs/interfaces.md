@@ -41,7 +41,7 @@
 
 ### Config 键
 
-`subagentProvider? / plannerModel? / researcherModel? / synthesizerModel? / verifierModel? / reviewerModel?(缺省=synthesizerModel) / maxParallel(4) / maxTotalAgents?(不写请求则用引擎默认) / searchBudget(6；生效预算再与 LIMIT(depth)=2/3/4 取小) / verifierMaxRounds(2) / maxItemsPerCall(4096) / workspaceDir?(默认 <session.header.cwd>/.research) / backgroundMode('background') / keepRuns(≥1,默认20) / rawNotes(保留,no-op)`
+`subagentProvider? / plannerModel? / researcherModel? / synthesizerModel? / verifierModel? / reviewerModel?(缺省=synthesizerModel) / maxParallel(4) / maxTotalAgents?(不写请求则用引擎默认) / searchBudget(6；生效预算再与 LIMIT(depth)=2/3/4 取小) / verifierMaxRounds(2) / maxItemsPerCall(4096) / workspaceDir?(默认 <session.header.cwd>/.research) / backgroundMode('background') / keepRuns(≥1,默认20) / clarifyStrategy('minimal'; auto|minimal|never) / rawNotes(保留,no-op)`
 非法整数一律抛错；模型键仅在显式配置时写入 `args.models`。
 
 ## 3. SCRIPT args 注入契约（宿主 → 脚本）
@@ -90,3 +90,12 @@
 ## 6. 产物目录
 
 见 `docs/artifacts.md`。指针语义、保留策略与失败语义亦在该文档。
+
+## 7. 命令面 `/deep-research`
+
+意图入口（ADR-0003）：命令处理器不执行研究，只解析并把研究意图以用户态消息 `followup` 进主 agent，随即返回 `success`；实际执行由主 agent 调用 `deep_research` 工具（默认后台，完成通知）。
+
+- 语法：`<主题> [--depth 1-3] [--purpose "…"] [--clarify auto|minimal|never]`；`--depth` / `--purpose` / `--clarify` 均为建议性提示（`--clarify` 为命令级策略覆盖，缺省取配置 `clarifyStrategy`、默认 `minimal`；均渲染进 followup 文本，非强制约束）。
+- 已删除：`--foreground` / `--no-verify` / `--no-synthesize` / `--review`。
+- followup 消息 `source.kind`：`'user'`（意图入口替用户表达主题）。
+- 命令生命周期仍为宿主标准的 `command/run` / `command/done`（log-only）；真 turn 由 `agent.followup()` 开启。

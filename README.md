@@ -83,25 +83,20 @@ agent 也可以显式传参精确控制：
 
 ### 用户直达命令 `/deep-research`
 
-插件同时注册用户面命令（宿主直执行，不经模型，不占 agent 工具面）：
+插件同时注册用户面命令。命令是**意图入口**，不是直接执行器：它把主题作为一条用户态消息注入会话、开一轮真对话，由主 agent 承接——必要时先用 1–2 个关键问题澄清，否则直接调用 `deep_research` 工具。研究默认后台运行，完成时归属会话收到通知。
 
 ```
 /deep-research MCP 安全现状 --depth 3 --purpose "支撑选型决策"
 ```
 
-> ⚠️ **会话约束**：`workflowEngine` 被 standard/code preset isolate 在会话的
-> delegation 组里，该组随**首个对话轮次**装配——因此命令需要在**已有对话**
-> 的会话中使用；全新空会话请先发送任意一条消息，或直接用自然语言触发工具面
-> （工具面不受此约束）。这是官方命令系统「命令不包 turn」的结构性约束，
-> 执行结果以流节点落在所属会话内。
+命令提交即开启一轮真 turn，会话立即可见、composer 立即可用（不再有"空会话需先发消息"的约束）。
 
 | 片段 | 说明 |
 | --- | --- |
 | `<主题>` | 必填，剩余文本即主题 |
-| `--depth 1-3` | 研究精度（默认 2） |
-| `--purpose "…"` | 研究用途 |
-| `--no-verify` / `--no-synthesize` / `--review` | 关验证 / 只出证据中间态 / 追加对抗审查 |
-| `--foreground` | 前台等待完成（默认后台，完成时通知） |
+| `--depth 1-3` | 研究精度（建议性提示，默认 2） |
+| `--clarify auto\|minimal\|never` | 澄清策略覆盖（建议性提示；缺省取配置 `clarifyStrategy`，默认 `minimal`） |
+| `--purpose "…"` | 研究用途（建议性提示） |
 
 ### 后台模式（默认）
 
@@ -141,6 +136,7 @@ agent 也可以显式传参精确控制：
 | `workspaceDir` | `<会话cwd>/.research` | 产物根目录 |
 | `backgroundMode` | background | 默认执行模式 |
 | `keepRuns` | 20 | 每会话保留最近 N 次 run 产物（≥1，非法整数报错） |
+| `clarifyStrategy` | `minimal` | 入口澄清策略：`minimal`=仅当缺失信息分叉答案空间时才问（≤1 轮 1 问、可跳过）；`auto`=v1 行为；`never`=禁止访谈，假设写入 `purpose` |
 
 全部键与语义：[`docs/interfaces.md`](docs/interfaces.md)；配置示例：[`docs/setup.md`](docs/setup.md)。
 
