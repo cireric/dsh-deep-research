@@ -6,3 +6,12 @@ node_modules/
 
 # tsbuildinfo
 *.tsbuildinfo
+
+# npm pack artifacts (dev_build_plugin production line)
+*.tgz
+
+# pnpm local package store (v11 resolves the store next to the project)
+.pnpm-store/
+
+# research-run artifacts (deep_research workshop output)
+.research/
