@@ -342,11 +342,15 @@ async function runResearch(
   }
   if (!engine) {
     const cause = probeError instanceof Error ? ` 探查原因：${probeError.message}` : ''
+    // 前置条件失败＝快速明确失败，不做任何跨技能/轻量降级替代（评审：不耦合
+    // 其他 skill；用户要的是深度研究，引擎缺失不等于可以悄悄换成别的产出）。
     throw new Error(
       'deep_research: workflowEngine unavailable in the calling agent scope — '
-        + 'make sure the preset mounts a delegation group with `isolate: workflowEngine: true` '
-        + '(router-standard / standard / code), or register the engine on the agent scope '
-        + 'or host plane (resolution order: serviceForAgent -> agent.ctx -> host ctx)' + cause,
+        + '本次调用未执行（前置条件不满足，不做降级替代），修复步骤：'
+        + '① preset 挂载 delegation 组并 isolate workflowEngine（内置 router-standard / standard / PTC（ptc）预设）；'
+        + '② 或将引擎注册到 agent 作用域 / host 平面（解析顺序 serviceForAgent -> agent.ctx -> host ctx）；'
+        + '③ 若当前 agent 未 join 任何 preset（如未装配 delegation 组的部署、子代理），'
+        + '请在挂载了 delegation 组的预设（router-standard / standard / PTC）主会话中重试。' + cause,
     )
   }
 
@@ -488,13 +492,37 @@ async function runResearch(
  * turn, so a fresh command-only session un-blanks and becomes visible — then
  * returns immediately. The main agent clarifies if needed and calls the
  * `deep_research` tool (background by default).
+ *
+ * 前置检查（方案 A）：followup 之前先探测 workflow 引擎——缺失时返回明确错误，
+ * 不注入意图、不报「已发起」，更不引导改用其他技能/轻量方式替代。这是
+ * ADR-0003「命令必开一轮真 turn」的唯一例外：引擎不可用时研究本无法执行，
+ * 快速失败比空转一轮再失败更诚实。
  */
 function executeResearchCommand(
+  ctx: Context,
   invocation: CommandInvocation,
   clarifyStrategy: ClarifyStrategy,
 ): CommandResult {
   const parsed = parseResearchCommand(invocation.rawInput)
   if (!parsed.ok) return { kind: 'error', text: parsed.error }
+
+  // 引擎探测与工具面共用 resolveWorkflowEngine（serviceForAgent -> agent.ctx -> host ctx）。
+  // 官方预设（router-standard / standard / PTC）在 agent create/resume 装配时即挂好
+  // delegation 组（standing mount，先于任何 turn），因此正常会话此处应命中；失败仅出现在
+  // agent 未 join 任何 preset（rosterless / 未 join 的子代理）或预设缺 delegation 组时——
+  // 错误文本给出对应修复步骤（与 runResearch 缺引擎时一致）。
+  const probe = resolveWorkflowEngine(ctx, invocation.agent)
+  if (!probe.engine) {
+    const cause = probe.probeError instanceof Error ? ` 探查原因：${probe.probeError.message}` : ''
+    return {
+      kind: 'error',
+      text:
+        '/deep-research 未执行：当前会话未装配 workflow 引擎（前置条件不满足，不会降级为其他研究方式）。' +
+        '修复步骤：① 确认 preset 挂载 delegation 组并 isolate workflowEngine（内置 router-standard / standard / PTC（ptc）预设）；' +
+        '② 或将引擎注册到 agent 作用域 / host 平面（解析顺序 serviceForAgent -> agent.ctx -> host ctx）；' +
+        '③ 若当前 agent 未 join 任何 preset（如未装配 delegation 组的部署、子代理），请在挂载了 delegation 组的预设（router-standard / standard / PTC）主会话中重试。' + cause,
+    }
+  }
 
   // 命令级 --clarify 覆盖插件配置（缺失时用 resolved 策略，默认 minimal）。
   const policy = parsed.request.clarify ?? clarifyStrategy
@@ -526,9 +554,14 @@ export function apply(ctx: Context, config: Config = {}) {
       name: 'deep_research',
       description:
         '深度研究编排工具（Deep Research Orchestrator，基于 DSH 官方 workflow 引擎）。' +
-        '当用户要求对复杂主题做深度研究/调研（需要多源信息搜集、交叉验证、撰写调研报告）时调用。' +
+        '当用户要求对复杂主题做**深度**研究（需要多源交叉验证、收敛综合、撰写带引用的调研报告）时调用。' +
         '流程：规划（答案空间/维度/盲区）→ 自适应多轮并行研究 → 综合成报告 → 强制验证（有界修复环）→ 可选对抗审查。' +
-        '触发场景：深度研究、调研、多源信息综合分析、研究报告、文献/资料搜集。' +
+        '触发场景：深度调研、研究报告、文献/资料系统搜集、技术选型对比、需要多源证据与对抗性审查的主题。' +
+        '排除场景（重要）：用户只是要**轻量/快速**的主题调研、文档或 API 事实收集、或把阅读工作委托给后台代理时，' +
+        '**不要**调用本工具（按轻量方式直接处理即可）。' +
+        '仅当用户显式使用 /deep-research 命令，或明确表达「深度调研／深度研究／系统调研报告」意图时才调用本工具。' +
+        '前置条件：会话必须装配 workflow 引擎（preset 挂 delegation 组 `isolate: workflowEngine: true`，或引擎注册在 agent/host 平面）。' +
+        '未装配时工具会直接失败并给出修复步骤，**不得**改以其他方式/技能替代执行。' +
         '若需求模糊，按入口澄清策略做分叉级澄清（默认 minimal，可配置 auto|minimal|never）；可推断项一律自行默认；若已有具体问题清单，直接传 questions 可跳过自动拆解。' +
         '后台模式（默认）下 execute 立即返回 jobId，研究在后台运行，完成时向归属会话投递通知并落盘报告。',
       parameters: {
@@ -646,11 +679,11 @@ export function apply(ctx: Context, config: Config = {}) {
   ctx.effect(() => {
     const dispose = ctx.commands.register({
       name: 'deep-research',
-      description: '深度调研：发起一次研究意图，由主 agent 按 clarifyStrategy 处理澄清后调用 deep_research 工具（后台运行，完成时通知归属会话）',
+      description: '深度研究（deep research）：发起一次研究意图，由主 agent 按 clarifyStrategy 处理澄清后调用 deep_research 工具（后台运行，完成时通知归属会话）。用于需要多源交叉验证的深度调研/报告；轻量主题调研、文档/API 事实收集请按轻量方式直接处理，不要路由到深度研究。前置条件：会话须装配 workflow 引擎（preset 挂 delegation 组）；未装配时命令会立即报错并给出修复步骤，不会降级为其他研究方式。',
       input: {
         hint: '<主题> [--depth 1-3] [--purpose "…"] [--clarify auto|minimal|never]',
       },
-      handler: (invocation) => executeResearchCommand(invocation, resolved.clarifyStrategy),
+      handler: (invocation) => executeResearchCommand(ctx, invocation, resolved.clarifyStrategy),
     })
     return () => { dispose() }
   }, 'dsh-deep-research: /deep-research command')

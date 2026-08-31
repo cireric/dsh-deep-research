@@ -748,9 +748,14 @@ test('⑧ inject 不含 workflowEngine；调用时经解析链取引擎；缺失
       },
     })
     // a) 全部作用域无引擎（且桩 ctx 无 reflect——serviceForAgent 须宽松降级）→ 明确错误
-    await assert.rejects(
+    //    且不得引导改用其他技能/轻量方式替代（方案 A：前置条件失败 = 快速明确失败）
+    const errA = await assert.rejects(
       () => registered.execute({ topic: 't', background: false }, execOf(agentOf(() => undefined))),
       /workflowEngine unavailable/,
+    )
+    assert.ok(
+      !/research skill|lightweight research|改用.*技能/i.test(String(errA?.message ?? errA)),
+      '引擎缺失错误不得携带跨技能降级指引',
     )
     // b) ②链：agent 作用域有引擎 → 走该会话私有引擎实例（而非宿主 ctx）
     const startedB = []
@@ -772,6 +777,66 @@ test('⑧ inject 不含 workflowEngine；调用时经解析链取引擎；缺失
     const valueC = await registered.execute({ topic: 't', background: false }, execOf(agentOf(() => undefined)))
     assert.equal(startedC.length, 1, '③链：host 平面引擎被采用')
     assert.equal(valueC.status, 'completed')
+  } finally {
+    await rm(base, { recursive: true, force: true })
+  }
+})
+
+// ════════════════════════════════════════════════════════════════════════════
+// ⑨ 命令面前置检查（方案 A / ADR-0003 例外）：引擎缺失时立即返回 error，
+// 不注入意图、不报「已发起」、不引导改用其他技能；引擎在位才 followup 开 turn。
+// ════════════════════════════════════════════════════════════════════════════
+
+test('⑨ 命令面前置检查：引擎缺失立即报错且不注入意图；引擎在位才 followup 开 turn', async () => {
+  const idxUrl = new URL('../src/index.ts', import.meta.url).href
+  const { apply } = await import(idxUrl)
+  const base = await mkdtemp(path.join(tmpdir(), 'ddr-cmd-preflight-'))
+  try {
+    let cmdDef
+    let toolDef
+    const hostCtx = {
+      tools: { register: (def) => { toolDef = def } },
+      commands: { register: (def) => { cmdDef = def; return () => {} } },
+      effect: (cb) => { cb() },
+    }
+    apply(hostCtx, {})
+    assert.ok(toolDef, 'deep_research 工具已注册')
+    assert.ok(cmdDef, '/deep-research 命令已注册')
+
+    const agentOf = (get, followup) => ({
+      id: 'a-cmd',
+      session: { header: { cwd: base } },
+      ctx: { get },
+      ...(followup !== undefined ? { followup } : {}),
+    })
+    const invoke = (agent) => ({ rawInput: 'MCP 安全现状', agent })
+
+    // a) 引擎缺失 → error 结果；不 followup、不报「已发起」、不带跨技能降级指引
+    const followupsA = []
+    const agentA = agentOf(() => undefined, (msg) => { followupsA.push(msg) })
+    const resultA = cmdDef.handler(invoke(agentA))
+    assert.equal(resultA.kind, 'error', '引擎缺失时命令返回 error')
+    assert.match(resultA.text, /未执行.*workflow 引擎|workflow 引擎.*未执行/)
+    assert.match(resultA.text, /router-standard \/ standard \/ PTC/)
+    assert.match(resultA.text, /主会话中重试/)
+    assert.ok(
+      !/research skill|lightweight research|改用.*技能/i.test(resultA.text),
+      '命令失败文本不得携带跨技能降级指引',
+    )
+    assert.equal(followupsA.length, 0, '引擎缺失时命令不得注入意图')
+
+    // b) 引擎在位（agent 作用域挂载）→ success；followup 注入深度研究意图
+    const followupsB = []
+    const agentB = agentOf(
+      (name) => (name === 'workflowEngine' ? { fake: true } : undefined),
+      (msg) => { followupsB.push(msg) },
+    )
+    const resultB = cmdDef.handler(invoke(agentB))
+    assert.equal(resultB.kind, 'success', '引擎在位时命令返回成功')
+    assert.equal(followupsB.length, 1, '引擎在位时命令注入一条意图消息')
+    const text = followupsB[0].content[0].text
+    assert.match(text, /深度研究/)
+    assert.match(text, /MCP 安全现状/)
   } finally {
     await rm(base, { recursive: true, force: true })
   }
